@@ -1,4 +1,4 @@
-/* eslint-disable by renallop*/
+/* eslint-disable */
 import { useState, useEffect, useCallback, useRef } from "react";
 import * as XLSX from "xlsx";
 import { guardar, obtenerTodos, escuchar, guardarMaestros, obtenerMaestros, guardarUsuarios, obtenerUsuarios, guardarCounter, obtenerCounter } from "./firebase";
@@ -1448,17 +1448,8 @@ function DashboardPlanner({user,onLogout,maestros,setMaestros,vales,users,setUse
     total_reg:HIST_KPIS.total_reg+vales.length,
     total_exc:HIST_KPIS.total_exc+vales.filter(v=>v.alertaEnviada).length,
   };
-  const addMant=async(key)=>{
-    if((maestros[key]||[]).includes(v)){setToast({msg:"Ya existe",type:"err"});return;}
-    const upd={...maestros,[key]:[...(maestros[key]||[]),v]};
-    await setMaestros(upd);
-    setToast({msg:"✓ Agregado",type:"ok"});
-  };
-  const delMant=async(key,idx)=>{
-    const arr=[...(maestros[key]||[])]; arr.splice(idx,1);
-    await setMaestros({...maestros,[key]:arr});
-    setToast({msg:"Eliminado"});
-  };
+  // MantList usa estado local — addMant ya no se necesita aquí
+  // delMant ya no se necesita aquí
   const addEquipo=async()=>{
     if(!eqInput.den){setToast({msg:"Ingrese nombre del equipo",type:"err"});return;}
     const eq={id:"EQ-"+Date.now(),den:eqInput.den,tipo:eqInput.tipo,placa:eqInput.placa};
