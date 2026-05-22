@@ -1,4 +1,4 @@
-/* eslint-disable */
+/* eslint-disable by renallop*/
 import { useState, useEffect, useCallback, useRef } from "react";
 import * as XLSX from "xlsx";
 import { guardar, obtenerTodos, escuchar, guardarMaestros, obtenerMaestros, guardarUsuarios, obtenerUsuarios, guardarCounter, obtenerCounter } from "./firebase";
@@ -407,7 +407,7 @@ function FirmaCanvas({label, value, onChange}){
     </div>
   );
 }
-function AppAlmacenero({user,onLogout,maestros,vales,setVales,appValeNum=1,onValeNumChange}){
+function AppAlmacenero({user,onLogout,maestros,vales,setVales}){
   const [tab,setTab]=useState("nuevo");
   const [toast,setToast]=useState({msg:""});
   const [tipoFiltro,setTipoFiltro]=useState("");
@@ -419,12 +419,17 @@ function AppAlmacenero({user,onLogout,maestros,vales,setVales,appValeNum=1,onVal
   const [fotoMedidor,setFotoMedidor]=useState(null);
   const [showAlerta,setShowAlerta]=useState(false);
   const [alertaMsg,setAlertaMsg]=useState("");
-  const [valeNum,setValeNumState]=useState(1);
+  const [valeNum,setValeNum]=useState(1);
 
   const handleTipo=(t)=>{
     setTipoFiltro(t);
     setForm(f=>({...f,equipoId:"",producto:""}));
   };
+  // Cargar el número de vale desde Firebase al iniciar
+  useEffect(()=>{
+    obtenerCounter().then(n=>{ if(n && n>0) setValeNum(n); }).catch(()=>{});
+  },[]);
+
   const equipo=maestros.equipos.find(e=>e.id===form.equipoId);
   const ultimoKm = form.equipoId
     ? [...vales].reverse().find(v=>v.equipoId===form.equipoId&&v.km>0)?.km || null
@@ -448,7 +453,11 @@ function AppAlmacenero({user,onLogout,maestros,vales,setVales,appValeNum=1,onVal
       setAlertaMsg(`${gl.toFixed(1)} gl supera el umbral estimado de ${(umbral*1.2).toFixed(1)} gl · Ratio teórico: ${teoLabel}`);
     }else setShowAlerta(false);
   },[gl,teoRatio,equipo]);
-  const handleSubmit=async()=>{
+  const handleValeNumChange = async(n)=>{
+    setValeNum(n);
+    try{ await guardarCounter(n); }catch(e){ console.warn(e); }
+  };
+    const handleSubmit=async()=>{
     if(!form.fundo||!form.equipoId||!form.actividad||!form.almacenero||!form.chofer){
       setToast({msg:"Complete todos los campos obligatorios (*)",type:"err"});return;
     }
@@ -2703,9 +2712,7 @@ export default function App(){
     return <Login onLogin={setCurrentUser} users={users}/>;
   if(currentUser.rol==="alm")
     return <AppAlmacenero user={currentUser} onLogout={()=>setCurrentUser(null)}
-      maestros={maestros} vales={vales} setVales={setVales}
-      appValeNum={valeNum} onValeNumChange={async(n)=>{setValeNumState(n);try{await guardarCounter(n);}catch(e){console.warn(e);}}}
-    />;
+      maestros={maestros} vales={vales} setVales={setVales}/>;
   if(currentUser.rol==="apro")
     return <AppAprobador user={currentUser} onLogout={()=>setCurrentUser(null)}
       vales={vales} setVales={setVales} users={users}
