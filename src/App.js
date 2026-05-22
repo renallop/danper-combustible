@@ -135,23 +135,9 @@ const INIT_USERS = [
   {id:"u5",usuario:"supervisor",pass:"1234",   rol:"apro", nombre:"Supervisor Arándano",   activo:true, cultivos:["ARANDANO"]},
   {id:"u6",usuario:"renallop",  pass:"Danper2026!",rol:"ger",nombre:"Renato Llop",          activo:true, cultivos:[]},
 ];
-const HIST_KPIS = {total_gl:11958.6,total_reg:589,total_exc:90,total_def:61,equipos:44};
-const HIST_EXCESOS = [
-  {id:"10015246",ef:"CISTERNA N°38 / TFQ-877",t:"I",fe:"2026-04-16",gl:64.4,es:23.75,df:40.65,fu:"MARIA DEL ROSARIO",ac:["MANTENIMIENTO DE MODULO"],chofer:""},
-  {id:"10009219",ef:"CISTERNA N°23 / T0T-916",t:"I",fe:"2026-04-27",gl:65.31,es:25.75,df:39.56,fu:"",ac:[],chofer:""},
-  {id:"10009993",ef:"CISTERNA N°26 / TAM-944",t:"I",fe:"2026-04-23",gl:64.5,es:25.5,df:39.0,fu:"MUCHIK",ac:["RIEGO DE ENSEÑO"],chofer:""},
-  {id:"10015010",ef:"CISTERNA N°31 / TFE-863",t:"I",fe:"2026-04-30",gl:63.2,es:28.58,df:34.62,fu:"EL PALMAR",ac:["MANTENIMIENTO DE MODULO"],chofer:""},
-  {id:"10009219",ef:"CISTERNA N°23 / T0T-916",t:"I",fe:"2026-04-08",gl:51.4,es:26.67,df:24.73,fu:"COMPOSITAN",ac:["RIEGO DE ENSEÑO"],chofer:""},
-  {id:"10015010",ef:"CISTERNA N°31 / TFE-863",t:"I",fe:"2026-04-07",gl:55.5,es:32.7,df:22.8,fu:"AGROMORIN",ac:["MANTENIMIENTO DE MODULO"],chofer:""},
-  {id:"10009400",ef:"TRACTOR JOHN DEERE N°34",t:"T",fe:"2026-04-17",gl:40.42,es:30.08,df:10.34,fu:"MUCHIK",ac:["ELIMINACION DE CULTIVOS PREP. TERRENO"],chofer:""},
-  {id:"10009400",ef:"TRACTOR JOHN DEERE N°34",t:"T",fe:"2026-04-22",gl:39.58,es:30.88,df:8.7,fu:"MUCHIK",ac:["ELIMINACION DE CULTIVOS PREP. TERRENO"],chofer:""},
-];
-const HIST_DEFICITS = [
-  {id:"10007889",ef:"CISTERNA N°18 / T9S-821",t:"I",fe:"2026-04-28",gl:34.5,es:52.8,df:-18.3,fu:"COMPOSITAN",ac:["RIEGO DE ENSEÑO"],chofer:""},
-  {id:"10004219",ef:"TRACTOR JOHN DEERE N°27",t:"T",fe:"2026-04-01",gl:26.1,es:56.0,df:-29.9,fu:"COMPOSITAN",ac:["APLICACIÓN MECANIZADA"],chofer:""},
-  {id:"10010736",ef:"TRACTOR JOHN DEERE N°43",t:"T",fe:"2026-04-20",gl:48.49,es:75.52,df:-27.03,fu:"COMPOSITAN",ac:["ELIMINACION DE CULTIVOS"],chofer:""},
-  {id:"10011646",ef:"TRACTOR JOHN DEERE N°45",t:"T",fe:"2026-04-02",gl:38.5,es:61.6,df:-23.1,fu:"COMPOSITAN",ac:["ELIMINACION DE CULTIVOS"],chofer:""},
-];
+const HIST_KPIS = {total_gl:0,total_reg:0,total_exc:0,total_def:0,equipos:0};
+const HIST_EXCESOS = [];
+const HIST_DEFICITS = [];
 // ─── FIREBASE STORAGE ────────────────────────────────────────────────────────
 // Compatibilidad: stGet/stSet ahora usan Firebase
 const MEM = {}; // cache local para rapidez
