@@ -1,7 +1,7 @@
 // ─── CONFIGURACIÓN FIREBASE ───────────────────────────────────────────────────
 // Credenciales de danper-combustible
 import { initializeApp } from "firebase/app";
-import { getFirestore, collection, doc, getDocs, setDoc, updateDoc, onSnapshot, query, orderBy } from "firebase/firestore";
+import { getFirestore, collection, doc, getDocs, setDoc, onSnapshot } from "firebase/firestore";
 
 const firebaseConfig = {
   apiKey: "AIzaSyALamMfb2VlceXLwszg7PKBbHQpFgM-HY8",
