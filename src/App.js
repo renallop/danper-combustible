@@ -194,7 +194,7 @@ function Toast({msg,type,onClose}){
 function Login({onLogin,users}){
   const [u,setU]=useState(""); const [p,setP]=useState(""); const [err,setErr]=useState("");
   const attempt=(usr,pw)=>{
-    const found=(users||INIT_USERS).find(x=>x.usuario===usr?.trim().toLowerCase()&&x.activo!==false);
+    const found=(users&&users.length>0?users:INIT_USERS).find(x=>x.usuario===usr?.trim().toLowerCase()&&x.activo!==false);
     if(!found||found.pass!==pw){setErr("Usuario o contraseña incorrectos");return;}
     setErr(""); onLogin(found);
   };
@@ -2678,27 +2678,62 @@ export default function App(){
   const [maestros,setMaestrosState]=useState(INIT_MAESTROS);
   const [vales,setValesState]=useState([]);
   const [users,setUsersState]=useState(INIT_USERS);
+  const [cargando,setCargando]=useState(true);
+
+  // ── Cargar datos desde Firebase al iniciar ────────────────────────────────
   useEffect(()=>{
+    let unsubVales=null;
     (async()=>{
       try{
-        const m=await stGet("maestros"); if(m)setMaestrosState(JSON.parse(m));
-        const v=await stGet("vales");    if(v)setValesState(JSON.parse(v));
-        const u=await stGet("users");    if(u)setUsersState(JSON.parse(u));
-      }catch{}
+        // Cargar maestros desde Firebase
+        const m = await obtenerMaestros();
+        if(m && Object.keys(m).length>0) setMaestrosState(m);
+
+        // Cargar usuarios desde Firebase
+        const u = await obtenerUsuarios();
+        if(u && u.length>0) setUsersState(u);
+
+      }catch(e){ console.warn("Error cargando config:",e); }
+
+      // Escuchar vales en tiempo real
+      unsubVales = escuchar("vales", (datos)=>{
+        if(datos) setValesState(datos.sort((a,b)=>(a.id||0)-(b.id||0)));
+      });
+
+      setCargando(false);
     })();
+    return ()=>{ if(unsubVales) unsubVales(); };
   },[]);
+
   const setMaestros=useCallback(async(m)=>{
     setMaestrosState(m);
-    await stSet("maestros",JSON.stringify(m));
+    try{ await guardarMaestros(m); }catch(e){ console.warn(e); }
   },[]);
-  const setVales=useCallback(async(v)=>{
-    setValesState(v);
-    await stSet("vales",JSON.stringify(v));
+
+  const setVales=useCallback(async(nuevos)=>{
+    setValesState(nuevos);
+    // Guardar solo los vales que cambiaron
+    if(nuevos && nuevos.length>0){
+      const ultimo=nuevos[nuevos.length-1];
+      try{ await guardar("vales",ultimo.id,ultimo); }catch(e){ console.warn(e); }
+    }
   },[]);
+
   const setUsers=useCallback(async(u)=>{
     setUsersState(u);
-    await stSet("users",JSON.stringify(u));
+    try{ await guardarUsuarios(u); }catch(e){ console.warn(e); }
   },[]);
+
+  if(cargando) return(
+    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",
+      background:"linear-gradient(145deg,#1a0305,#0B1628)",flexDirection:"column",gap:16}}>
+      <div style={{width:56,height:56,border:"4px solid rgba(200,16,46,.3)",
+        borderTop:"4px solid #C8102E",borderRadius:"50%",
+        className:"spin-anim"}}/>
+      <style>{".spin-anim{animation:spin 1s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}"}</style>
+      <div style={{color:"rgba(255,255,255,.6)",fontSize:14}}>Conectando con Firebase...</div>
+    </div>
+  );
   if(!currentUser)
     return <Login onLogin={setCurrentUser} users={users}/>;
   if(currentUser.rol==="alm")
