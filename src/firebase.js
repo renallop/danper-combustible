@@ -1,7 +1,11 @@
 // ─── CONFIGURACIÓN FIREBASE ───────────────────────────────────────────────────
 // Credenciales de danper-combustible
 import { initializeApp } from "firebase/app";
-import { getFirestore, collection, doc, getDocs, setDoc, onSnapshot } from "firebase/firestore";
+import {
+  getFirestore, collection, doc,
+  getDocs, getDoc, setDoc,
+  onSnapshot, runTransaction
+} from "firebase/firestore";
 
 const firebaseConfig = {
   apiKey: "AIzaSyALamMfb2VlceXLwszg7PKBbHQpFgM-HY8",
@@ -17,7 +21,8 @@ export const db = getFirestore(app);
 
 // ─── FUNCIONES DE BASE DE DATOS ───────────────────────────────────────────────
 
-// Guardar o actualizar un documento en una colección
+// Guardar o actualizar un documento en una colección.
+// Usa merge:true para no perder campos que no estén en `datos`.
 export async function guardar(coleccion, id, datos) {
   const ref = doc(db, coleccion, String(id));
   await setDoc(ref, { ...datos, _updatedAt: new Date().toISOString() }, { merge: true });
@@ -37,37 +42,68 @@ export function escuchar(coleccion, callback) {
   });
 }
 
-// Guardar la lista de maestros (un solo documento)
+// Guardar la lista de maestros (un solo documento).
+// merge:true evita borrar campos que no se incluyan en `maestros`
+// (importante cuando dos clientes editan secciones distintas en paralelo).
 export async function guardarMaestros(maestros) {
-  await setDoc(doc(db, "config", "maestros"), maestros);
+  await setDoc(
+    doc(db, "config", "maestros"),
+    { ...maestros, _updatedAt: new Date().toISOString() },
+    { merge: true }
+  );
 }
 
-// Obtener maestros
+// Obtener maestros (lectura directa por id, más eficiente que listar la colección)
 export async function obtenerMaestros() {
-  const snap = await getDocs(collection(db, "config"));
-  const maestrosDoc = snap.docs.find(d => d.id === "maestros");
-  return maestrosDoc ? maestrosDoc.data() : null;
+  const ref = doc(db, "config", "maestros");
+  const snap = await getDoc(ref);
+  return snap.exists() ? snap.data() : null;
 }
 
 // Guardar la lista de usuarios
 export async function guardarUsuarios(users) {
-  await setDoc(doc(db, "config", "usuarios"), { lista: users });
+  await setDoc(
+    doc(db, "config", "usuarios"),
+    { lista: users, _updatedAt: new Date().toISOString() },
+    { merge: true }
+  );
 }
 
 // Obtener usuarios
 export async function obtenerUsuarios() {
-  const snap = await getDocs(collection(db, "config"));
-  const usersDoc = snap.docs.find(d => d.id === "usuarios");
-  return usersDoc ? usersDoc.data().lista : null;
+  const ref = doc(db, "config", "usuarios");
+  const snap = await getDoc(ref);
+  return snap.exists() ? (snap.data().lista || null) : null;
 }
 
-// Guardar counter de vales
+// Guardar counter de vales (escritura simple — válida cuando el caller
+// ya obtuvo el siguiente número con reservarSiguienteVale).
 export async function guardarCounter(n) {
-  await setDoc(doc(db, "config", "counter"), { valeNum: n });
+  await setDoc(
+    doc(db, "config", "counter"),
+    { valeNum: n, _updatedAt: new Date().toISOString() },
+    { merge: true }
+  );
 }
 
 export async function obtenerCounter() {
-  const snap = await getDocs(collection(db, "config"));
-  const counterDoc = snap.docs.find(d => d.id === "counter");
-  return counterDoc ? counterDoc.data().valeNum : 1;
+  const ref = doc(db, "config", "counter");
+  const snap = await getDoc(ref);
+  return snap.exists() ? (snap.data().valeNum || 1) : 1;
+}
+
+// ─── CONTADOR ATÓMICO ─────────────────────────────────────────────────────────
+// Reserva el siguiente N° de vale de forma atómica (transacción).
+// Garantiza unicidad incluso cuando varios almaceneros despachan en paralelo
+// desde distintas terminales. Devuelve el número que el cliente debe usar
+// y deja el contador ya incrementado en Firestore.
+export async function reservarSiguienteVale() {
+  const ref = doc(db, "config", "counter");
+  return await runTransaction(db, async (tx) => {
+    const snap = await tx.get(ref);
+    const actual = snap.exists() ? (snap.data().valeNum || 1) : 1;
+    const siguiente = actual + 1;
+    tx.set(ref, { valeNum: siguiente, _updatedAt: new Date().toISOString() }, { merge: true });
+    return actual; // este es el número que el cliente usará
+  });
 }

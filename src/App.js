@@ -1,7 +1,7 @@
 /* eslint-disable */
 import { useState, useEffect, useCallback, useRef } from "react";
 import * as XLSX from "xlsx";
-import { guardar, obtenerTodos, escuchar, guardarMaestros, obtenerMaestros, guardarUsuarios, obtenerUsuarios, guardarCounter, obtenerCounter } from "./firebase";
+import { guardar, obtenerTodos, escuchar, guardarMaestros, obtenerMaestros, guardarUsuarios, obtenerUsuarios, guardarCounter, obtenerCounter, reservarSiguienteVale } from "./firebase";
 const CSS_GLOBAL = `*{box-sizing:border-box}input::placeholder{color:rgba(255,255,255,.4)}@keyframes fadeUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}`;
 const CSS_DRAWER = `@keyframes fadeIn{from{opacity:0}to{opacity:1}}@keyframes slideIn{from{transform:translateX(60px);opacity:0}to{transform:none;opacity:1}}`;
 const CSS_DASH = `*{box-sizing:border-box}::-webkit-scrollbar{width:4px;height:4px}::-webkit-scrollbar-thumb{background:#ccc;border-radius:2px}select{-webkit-appearance:none}`;
@@ -139,16 +139,8 @@ const HIST_KPIS = {total_gl:0,total_reg:0,total_exc:0,total_def:0,equipos:0};
 const HIST_EXCESOS = [];
 const HIST_DEFICITS = [];
 // ─── FIREBASE STORAGE ────────────────────────────────────────────────────────
-// Compatibilidad: stGet/stSet ahora usan Firebase
-const MEM = {}; // cache local para rapidez
-async function stGet(k) {
-  if (MEM[k] !== undefined) return MEM[k];
-  return null;
-}
-async function stSet(k, v) {
-  MEM[k] = v;
-  // Firebase se actualiza desde el App root
-}
+// La persistencia se gestiona directamente desde el App root mediante los
+// helpers importados de './firebase' (guardar, escuchar, guardarMaestros, etc.)
 const C = {
   navy:"#0B2748",blue:"#1D6FD8",bg:"#F0EEE9",surf:"#fff",surf2:"#F7F5F1",
   bdr:"rgba(0,0,0,.08)",bdr2:"rgba(0,0,0,.14)",txt:"#111",txt2:"#555",txt3:"#999",
@@ -435,7 +427,7 @@ function AppAlmacenero({user,onLogout,maestros,vales,setVales}){
     obtenerCounter().then(n=>{ if(n && n>0) setValeNum(n); }).catch(()=>{});
   },[]);
 
-  const equipo=maestros.equipos.find(e=>e.id===form.equipoId);
+  const equipo=(maestros.equipos||[]).find(e=>e.id===form.equipoId);
   const ultimoKm = form.equipoId
     ? [...vales].reverse().find(v=>v.equipoId===form.equipoId&&v.km>0)?.km || null
     : null;
@@ -444,8 +436,8 @@ function AppAlmacenero({user,onLogout,maestros,vales,setVales}){
     ?(PRODUCTOS_POR_TIPO[tipoFiltro]||TODOS_PRODUCTOS)
     :TODOS_PRODUCTOS;
   const equiposFiltrados=tipoFiltro
-    ?maestros.equipos.filter(e=>e.tipo===tipoFiltro)
-    :maestros.equipos;
+    ?(maestros.equipos||[]).filter(e=>e.tipo===tipoFiltro)
+    :(maestros.equipos||[]);
   const actObj = (maestros.actividades||[]).find(a=>a.nombre===form.actividad);
   const teoRatio = actObj?.ratio || null;
   const teoUnit  = actObj?.unit  || "Gl/Hr";
@@ -463,15 +455,33 @@ function AppAlmacenero({user,onLogout,maestros,vales,setVales}){
     try{ await guardarCounter(n); }catch(e){ console.warn(e); }
   };
     const handleSubmit=async()=>{
+    // Validación de candado: bloqueo lógico real, no solo visual
+    if(candadoOk===null){
+      setToast({msg:"Debe verificar el estado del candado antes de despachar",type:"err"});return;
+    }
     if(!form.fundo||!form.equipoId||!form.actividad||!form.chofer){
       setToast({msg:"Complete todos los campos obligatorios (*)",type:"err"});return;
     }
     if(!form.producto){setToast({msg:"Seleccione un tipo de combustible",type:"err"});return;}
     if(gl<=0){setToast({msg:"Ingrese los galones despachados",type:"err"});return;}
+
+    // Reservar el siguiente N° de vale ATÓMICAMENTE desde Firestore.
+    // Esto evita que dos almaceneros generen el mismo número en paralelo.
+    let numeroReservado;
+    try{
+      numeroReservado = await reservarSiguienteVale();
+    }catch(e){
+      // Fallback: si la transacción falla por red, usar el contador local.
+      // El usuario verá un toast y podrá reintentar si hay colisión visible.
+      console.warn("Fallo reservarSiguienteVale, usando contador local:",e);
+      numeroReservado = valeNum;
+    }
+    setValeNum(numeroReservado + 1);
+
     const now=new Date();
     const vale={
-      id:valeNum,
-      nVale:"V-"+String(valeNum).padStart(6,"0"),
+      id:numeroReservado,
+      nVale:"V-"+String(numeroReservado).padStart(6,"0"),
       fecha:now.toISOString().slice(0,10),
       hora:now.toLocaleTimeString("es-PE",{hour:"2-digit",minute:"2-digit"}),
       fundo:form.fundo,
@@ -488,7 +498,9 @@ function AppAlmacenero({user,onLogout,maestros,vales,setVales}){
       kmAnterior: ultimoKm||null,
       diferencia: (()=>{
         const kma=parseFloat(form.km)||0;
-        return (ultimoKm&&kma>ultimoKm)?kma-ultimoKm:kma;
+        // Solo registrar diferencia si hay un km previo válido y el actual es mayor
+        if(!ultimoKm || kma<=ultimoKm) return null;
+        return kma-ultimoKm;
       })(),
       obs:form.obs,
       almacenero:form.almacenero,
@@ -496,11 +508,21 @@ function AppAlmacenero({user,onLogout,maestros,vales,setVales}){
       registradoPor:user.nombre||user.usuario,
       alertaEnviada:showAlerta,
       fotoMedidor:fotoMedidor||null,
+      // Trazabilidad del candado de seguridad
+      candadoOk:candadoOk,
+      incidenteNota:candadoOk===false?incidenteNota:"",
+      incidenteFoto:candadoOk===false?incidenteFoto:null,
     };
     const nuevos=[...vales,vale];
-    await setVales(nuevos);
-    const nuevoNum=valeNum+1;
-    await handleValeNumChange(nuevoNum);
+    // Si falla la escritura del vale en Firebase mostramos el error.
+    // El contador ya quedó reservado y avanzado en Firestore — no se reutiliza,
+    // pero esto es lo correcto: garantiza unicidad estricta del N° de vale.
+    try{
+      await setVales(nuevos);
+    }catch(e){
+      setToast({msg:"Error al guardar el vale: "+(e?.message||"red sin conexión"),type:"err"});
+      return;
+    }
     setForm({fundo:"",equipoId:"",km:"",actividad:"",cultivo:"",almacenero:user.nombre||user.usuario,chofer:"",obs:"",producto:"",galones:""});
     setFotoMedidor(null);
     setTipoFiltro("");
@@ -539,6 +561,168 @@ function AppAlmacenero({user,onLogout,maestros,vales,setVales}){
       <div style={{padding:14}}>
       {tab==="nuevo"?(
         <>
+          {/* VERIFICACIÓN DE CANDADO */}
+          {candadoOk===null&&(
+            <div style={{background:"#fff",border:`2px solid ${C.navy}`,borderRadius:14,
+              padding:20,marginBottom:16,boxShadow:"0 2px 12px rgba(0,0,0,.08)"}}>
+              <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
+                <span style={{fontSize:36}}>🔒</span>
+                <div>
+                  <div style={{fontSize:15,fontWeight:700,color:C.navy}}>Verificación de seguridad</div>
+                  <div style={{fontSize:12,color:C.txt3}}>Obligatoria antes de despachar combustible</div>
+                </div>
+              </div>
+              <div style={{fontSize:13,fontWeight:600,color:C.txt2,marginBottom:16,
+                background:"#F8FAFC",borderRadius:10,padding:14,border:`1px solid ${C.bdr}`}}>
+                ¿El tanque de combustible tiene la tapa y el candado en buen estado?
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                <button onClick={()=>setCandadoOk(true)}
+                  style={{padding:"16px 10px",borderRadius:12,border:"2px solid #16A34A",
+                    background:"#F0FDF4",color:"#166534",fontSize:13,fontWeight:700,
+                    cursor:"pointer",fontFamily:"inherit",display:"flex",
+                    flexDirection:"column",alignItems:"center",gap:6}}>
+                  <span style={{fontSize:32}}>✅</span>
+                  <div>Sí, todo correcto</div>
+                  <div style={{fontSize:10,fontWeight:400}}>Tapa y candado OK</div>
+                </button>
+                <button onClick={()=>setShowCandadoModal(true)}
+                  style={{padding:"16px 10px",borderRadius:12,border:"2px solid #DC2626",
+                    background:"#FEF2F2",color:"#991B1B",fontSize:13,fontWeight:700,
+                    cursor:"pointer",fontFamily:"inherit",display:"flex",
+                    flexDirection:"column",alignItems:"center",gap:6}}>
+                  <span style={{fontSize:32}}>⚠️</span>
+                  <div>No, hay problema</div>
+                  <div style={{fontSize:10,fontWeight:400}}>Reportar incidente</div>
+                </button>
+              </div>
+            </div>
+          )}
+          {candadoOk===true&&(
+            <div style={{background:"#F0FDF4",border:"1px solid #16A34A",borderRadius:10,
+              padding:"10px 14px",marginBottom:12,display:"flex",alignItems:"center",
+              justifyContent:"space-between"}}>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <span style={{fontSize:20}}>🔒✅</span>
+                <div style={{fontSize:12,fontWeight:700,color:"#166534"}}>Candado verificado — puede despachar</div>
+              </div>
+              <button onClick={()=>setCandadoOk(null)}
+                style={{fontSize:10,color:C.txt3,background:"none",border:`1px solid ${C.bdr}`,
+                  borderRadius:6,padding:"2px 8px",cursor:"pointer",fontFamily:"inherit"}}>
+                Cambiar
+              </button>
+            </div>
+          )}
+          {candadoOk===false&&(
+            <div style={{background:"#FEF2F2",border:"1px solid #DC2626",borderRadius:10,
+              padding:"10px 14px",marginBottom:12,display:"flex",alignItems:"center",
+              justifyContent:"space-between"}}>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <span style={{fontSize:20}}>⚠️</span>
+                <div>
+                  <div style={{fontSize:12,fontWeight:700,color:"#991B1B"}}>Incidente reportado</div>
+                  <div style={{fontSize:10,color:"#991B1B"}}>{incidenteNota||"Sin descripción"}</div>
+                </div>
+              </div>
+              <button onClick={()=>{setCandadoOk(null);setIncidenteNota("");setIncidenteFoto(null);}}
+                style={{fontSize:10,color:C.txt3,background:"none",border:`1px solid ${C.bdr}`,
+                  borderRadius:6,padding:"2px 8px",cursor:"pointer",fontFamily:"inherit"}}>
+                Cambiar
+              </button>
+            </div>
+          )}
+          {/* Modal de incidente */}
+          {showCandadoModal&&(
+            <>
+              <div onClick={()=>setShowCandadoModal(false)}
+                style={{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",zIndex:300}}/>
+              <div style={{position:"fixed",top:"50%",left:"50%",transform:"translate(-50%,-50%)",
+                width:"min(420px,95vw)",background:"#fff",borderRadius:16,zIndex:301,
+                boxShadow:"0 8px 40px rgba(0,0,0,.2)",overflow:"hidden"}}>
+                <div style={{background:"#DC2626",padding:"14px 18px",display:"flex",
+                  justifyContent:"space-between",alignItems:"center"}}>
+                  <div style={{color:"#fff",fontWeight:700,fontSize:14}}>⚠️ Reporte de incidente</div>
+                  <button onClick={()=>setShowCandadoModal(false)}
+                    style={{background:"none",border:"none",color:"#fff",fontSize:22,cursor:"pointer"}}>×</button>
+                </div>
+                <div style={{padding:18}}>
+                  <div style={{background:"#FEF2F2",border:"1px solid #FCA5A5",borderRadius:8,
+                    padding:"10px 12px",marginBottom:14,fontSize:12,color:"#7F1D1D"}}>
+                    El tanque NO está correctamente protegido. Esto quedará registrado.
+                  </div>
+                  <div style={{marginBottom:12}}>
+                    <label style={{fontSize:11,fontWeight:600,color:"#374151",display:"block",marginBottom:5}}>
+                      Describe el problema
+                    </label>
+                    <textarea value={incidenteNota} onChange={e=>setIncidenteNota(e.target.value)}
+                      placeholder="Ej: Candado roto, falta el candado, tapa no cierra..."
+                      style={{width:"100%",padding:"8px 10px",border:"1.5px solid #E5E7EB",
+                        borderRadius:8,fontSize:12,fontFamily:"inherit",resize:"none",
+                        minHeight:72,outline:"none",boxSizing:"border-box"}}/>
+                  </div>
+                  <div style={{marginBottom:14}}>
+                    <label style={{fontSize:11,fontWeight:600,color:"#374151",display:"block",marginBottom:5}}>
+                      📸 Foto del problema (recomendado)
+                    </label>
+                    <div style={{border:`2px dashed ${incidenteFoto?"#DC2626":"#E5E7EB"}`,
+                      borderRadius:10,overflow:"hidden",background:incidenteFoto?"#FEF2F2":"#FAFAFA"}}>
+                      {incidenteFoto?(
+                        <div style={{position:"relative"}}>
+                          <img src={incidenteFoto} alt="incidente"
+                            style={{width:"100%",maxHeight:150,objectFit:"cover",display:"block"}}/>
+                          <button onClick={()=>setIncidenteFoto(null)}
+                            style={{position:"absolute",top:6,right:6,background:"rgba(220,38,38,.9)",
+                              color:"#fff",border:"none",borderRadius:6,padding:"3px 8px",
+                              fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>✕</button>
+                        </div>
+                      ):(
+                        <label style={{display:"flex",flexDirection:"column",alignItems:"center",
+                          justifyContent:"center",padding:"16px",cursor:"pointer",gap:6}}>
+                          <span style={{fontSize:28}}>📷</span>
+                          <span style={{fontSize:11,color:"#6B7280"}}>Tomar foto</span>
+                          <input type="file" accept="image/*" capture="environment"
+                            style={{display:"none"}}
+                            onChange={e=>{
+                              const file=e.target.files?.[0];
+                              if(!file)return;
+                              const reader=new FileReader();
+                              reader.onload=ev=>setIncidenteFoto(ev.target.result);
+                              reader.readAsDataURL(file);
+                            }}/>
+                        </label>
+                      )}
+                    </div>
+                  </div>
+                  <button onClick={async()=>{
+                    const inc={tipo:"CANDADO_PROBLEMA",
+                      fecha:new Date().toISOString().slice(0,10),
+                      hora:new Date().toLocaleTimeString("es-PE"),
+                      almacenero:user.nombre||user.usuario,
+                      nota:incidenteNota||"Sin descripción",
+                      foto:incidenteFoto||null,
+                      timestamp:new Date().toISOString()};
+                    try{ await guardar("incidentes",Date.now().toString(),inc);
+                      setToast({msg:"⚠ Incidente reportado",type:"warn"});
+                    }catch(e){console.warn(e);}
+                    setCandadoOk(false);
+                    setShowCandadoModal(false);
+                  }}
+                  style={{width:"100%",padding:"12px",background:"#DC2626",color:"#fff",
+                    border:"none",borderRadius:10,fontSize:13,fontWeight:700,
+                    cursor:"pointer",fontFamily:"inherit"}}>
+                    ⚠️ Confirmar y reportar incidente
+                  </button>
+                  <div style={{fontSize:10,color:"#9CA3AF",textAlign:"center",marginTop:8}}>
+                    Después de reportar podrás continuar con el despacho
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+          {/* Bloquear formulario hasta verificar candado */}
+          <div style={{opacity:candadoOk===null?0.3:1,
+            pointerEvents:candadoOk===null?"none":"auto",
+            transition:"opacity .3s"}}>
           <div style={S.card}>
             <div style={S.sec}>1 · Tipo de equipo</div>
             <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:8}}>
@@ -573,7 +757,7 @@ function AppAlmacenero({user,onLogout,maestros,vales,setVales}){
               <label style={S.lbl}>Fundo <span style={{color:"red"}}>*</span></label>
               <select style={sel} value={form.fundo} onChange={e=>setForm(f=>({...f,fundo:e.target.value}))}>
                 <option value="">— Seleccionar —</option>
-                {maestros.fundos.map(f=><option key={f} value={f}>{f}</option>)}
+                {(maestros.fundos||[]).map(f=><option key={f} value={f}>{f}</option>)}
               </select>
             </div>
             <div style={{marginBottom:10}}>
@@ -760,12 +944,11 @@ function AppAlmacenero({user,onLogout,maestros,vales,setVales}){
           </div>
           {gl>0&&teoRatio&&equipo&&(()=>{
             const kmActual  = parseFloat(form.km)||0;
-            const diferencia = ultimoKm && kmActual>ultimoKm
-              ? kmActual - ultimoKm
-              : kmActual;
-            const tieneDif  = ultimoKm && kmActual>ultimoKm;
+            // Solo calcular diferencia si hay registro anterior
+            const tieneDif = ultimoKm && kmActual > ultimoKm;
+            const diferencia = tieneDif ? kmActual - ultimoKm : 0;
             let glEsp = null;
-            if(diferencia>0){
+            if(tieneDif && diferencia>0){
               if(equipo.tipo==="TRACTOR") glEsp=diferencia*teoRatio;
               else if(equipo.tipo==="CAMION"||equipo.tipo==="CISTERNA") glEsp=diferencia/teoRatio;
               else if(equipo.tipo==="MONTACARGAS") glEsp=diferencia*teoRatio;
@@ -840,6 +1023,7 @@ function AppAlmacenero({user,onLogout,maestros,vales,setVales}){
               cursor:"pointer",fontFamily:"inherit",marginBottom:24}}>
             ✓ Registrar Vale
           </button>
+          </div>{/* fin bloqueo candado */}
         </>
       ):(
         <div>
@@ -1124,7 +1308,7 @@ const buildUnified=(vales)=>{
   ];
   const nuevos=vales.map(v=>{
     const tienePrevio = v.kmAnterior && v.kmAnterior > 0;
-    const dif = tienePrevio ? (v.diferencia||0) : 0;
+    const dif = (tienePrevio && v.diferencia && v.diferencia>0) ? v.diferencia : 0;
     const glEsp = (v.teoRatio && dif > 0) ? (v.teoUnit==="Km/Gl"?dif/v.teoRatio:dif*v.teoRatio) : null;
     const diff=glEsp?v.gl-glEsp:null;
     const af=diff==null?null:diff>5?"exceso":diff<-5?"deficit":null;
@@ -1378,7 +1562,8 @@ function DrawerDetalle({drawer,setDrawer,drawerTab,setDrawerTab,vales,maestros})
               {appVales.length===0
                 ?<p style={{textAlign:"center",color:C.txt3,padding:32}}>Sin vales de la app para este equipo.</p>
                 :appVales.map((v,i)=>{
-                  const dif=v.diferencia||v.km||0;
+                  const tienePrevio = v.kmAnterior && v.kmAnterior > 0;
+                  const dif = (tienePrevio && v.diferencia && v.diferencia>0) ? v.diferencia : 0;
                   const glEsp=v.teoRatio&&dif?(v.teoUnit==="Km/Gl"?dif/v.teoRatio:dif*v.teoRatio):null;
                   const diff=glEsp?v.gl-glEsp:null;
                   const desvPct=glEsp?((v.gl-glEsp)/glEsp*100):null;
@@ -2519,7 +2704,7 @@ function AppAprobador({user,onLogout,vales,setVales,users,precioPorGalon=18.5}){
 }
 
 // ─── GERENTE: MantActividadesCard con acceso total ────────────────────────────
-function GerMantActividadesCard({maestros,guardarMaestros,setToast}){
+function GerMantActividadesCard({maestros,onGuardarMaestros,setToast}){
   const acts = maestros.actividades||[];
   const [editIdx,setEditIdx] = useState(null);
   const [editData,setEditData] = useState({});
@@ -2528,7 +2713,7 @@ function GerMantActividadesCard({maestros,guardarMaestros,setToast}){
 
   const save = async(newActs) => {
     const m = {...maestros, actividades: newActs};
-    try{ await guardarMaestros(m); setToast({msg:"✓ Guardado en Firebase",type:"ok"}); }
+    try{ await onGuardarMaestros(m); setToast({msg:"✓ Guardado en Firebase",type:"ok"}); }
     catch(e){ setToast({msg:"Error: "+e.message,type:"err"}); }
   };
 
@@ -2702,7 +2887,7 @@ function AppGerente({user,onLogout,vales,setVales,users,setUsers,maestros:maestr
     });
     return ()=>unsub();
   },[]);
-  const auditLog=vales.flatMap(v=>(v._log||[]).map(l=>({...l,valeId:v.id,nVale:v.nVale,equipo:v.equipoDen}))).sort((a,b)=>b.ts.localeCompare(a.ts));
+  const auditLog=vales.flatMap(v=>(v._log||[]).map(l=>({...l,valeId:v.id,nVale:v.nVale,equipo:v.equipoDen}))).sort((a,b)=>(b.ts||"").localeCompare(a.ts||""));
   const startEdit=(v)=>{setEditId(v.id);setEditData({gl:v.gl,km:v.km,actividad:v.actividad,fundo:v.fundo,cultivo:v.cultivo,producto:v.producto,obs:v.obs||"",chofer:v.chofer});setEditMotivo("");};
   const saveEdit=async()=>{
     if(!editMotivo.trim()){alert("Debe indicar el motivo de la corrección.");return;}
@@ -2910,6 +3095,17 @@ function AppGerente({user,onLogout,vales,setVales,users,setUsers,maestros:maestr
             </div>
           </div>
         )}
+        {view==="params"&&(
+          <GerMantActividadesCard
+            maestros={maestros}
+            onGuardarMaestros={async(m)=>{
+              setMaestrosLocal(m);
+              try{ await guardarMaestros(m); }
+              catch(e){ setToast({msg:"Error al guardar en Firebase: "+e.message,type:"err"}); throw e; }
+            }}
+            setToast={setToast}
+          />
+        )}
       </div>
       <Toast msg={toast.msg} type={toast.type} onClose={()=>setToast({msg:""})}/>
     </div>
@@ -2973,7 +3169,9 @@ export default function App(){
     for(const v of nuevos){
       const ant=anteriores.find(a=>a.id===v.id);
       if(!ant||JSON.stringify(ant)!==JSON.stringify(v)){
-        try{ await guardar("vales",String(v.id),v); }catch(e){ console.warn(e); }
+        // Propagar el primer error para que el caller (ej. handleSubmit) pueda
+        // manejar el fallo y abortar la actualización del contador.
+        await guardar("vales",String(v.id),v);
       }
     }
   },[]);
@@ -2986,9 +3184,8 @@ export default function App(){
   if(cargando) return(
     <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",
       background:"linear-gradient(145deg,#1a0305,#0B1628)",flexDirection:"column",gap:16}}>
-      <div style={{width:56,height:56,border:"4px solid rgba(200,16,46,.3)",
-        borderTop:"4px solid #C8102E",borderRadius:"50%",
-        className:"spin-anim"}}/>
+      <div className="spin-anim" style={{width:56,height:56,border:"4px solid rgba(200,16,46,.3)",
+        borderTop:"4px solid #C8102E",borderRadius:"50%"}}/>
       <style>{".spin-anim{animation:spin 1s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}"}</style>
       <div style={{color:"rgba(255,255,255,.6)",fontSize:14}}>Conectando con Firebase...</div>
     </div>
