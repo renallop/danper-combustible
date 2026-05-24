@@ -413,7 +413,7 @@ function AppAlmacenero({user,onLogout,maestros,vales,setVales}){
   const [tipoFiltro,setTipoFiltro]=useState("");
   const [form,setForm]=useState({
     fundo:"",equipoId:"",km:"",actividad:"",cultivo:"",
-    almacenero:"",chofer:"",obs:"",
+    almacenero:user.nombre||user.usuario,chofer:"",obs:"",
     producto:"",galones:"",
   });
   const [fotoMedidor,setFotoMedidor]=useState(null);
@@ -458,7 +458,7 @@ function AppAlmacenero({user,onLogout,maestros,vales,setVales}){
     try{ await guardarCounter(n); }catch(e){ console.warn(e); }
   };
     const handleSubmit=async()=>{
-    if(!form.fundo||!form.equipoId||!form.actividad||!form.almacenero||!form.chofer){
+    if(!form.fundo||!form.equipoId||!form.actividad||!form.chofer){
       setToast({msg:"Complete todos los campos obligatorios (*)",type:"err"});return;
     }
     if(!form.producto){setToast({msg:"Seleccione un tipo de combustible",type:"err"});return;}
@@ -496,7 +496,7 @@ function AppAlmacenero({user,onLogout,maestros,vales,setVales}){
     await setVales(nuevos);
     const nuevoNum=valeNum+1;
     await handleValeNumChange(nuevoNum);
-    setForm({fundo:"",equipoId:"",km:"",actividad:"",cultivo:"",almacenero:"",chofer:"",obs:"",producto:"",galones:""});
+    setForm({fundo:"",equipoId:"",km:"",actividad:"",cultivo:"",almacenero:user.nombre||user.usuario,chofer:"",obs:"",producto:"",galones:""});
     setFotoMedidor(null);
     setTipoFiltro("");
     setShowAlerta(false);
@@ -675,12 +675,13 @@ function AppAlmacenero({user,onLogout,maestros,vales,setVales}){
           <div style={S.card}>
             <div style={S.sec}>5 · Responsables y firmas</div>
             
-            <div style={{marginBottom:14}}>
-              <label style={S.lbl}>Almacenero / Grifero <span style={{color:"red"}}>*</span></label>
-              <select style={sel} value={form.almacenero} onChange={e=>setForm(f=>({...f,almacenero:e.target.value}))}>
-                <option value="">— Seleccionar —</option>
-                {maestros.almaceneros.map(a=><option key={a} value={a}>{a}</option>)}
-              </select>
+            <div style={{marginBottom:8,background:"#F0FDF4",border:"1px solid #BBF7D0",
+              borderRadius:8,padding:"8px 12px",display:"flex",alignItems:"center",gap:8}}>
+              <span style={{fontSize:18}}>🧑‍🔧</span>
+              <div>
+                <div style={{fontSize:10,color:"#166534",fontWeight:600,textTransform:"uppercase",letterSpacing:.5}}>Almacenero / Grifero</div>
+                <div style={{fontSize:13,fontWeight:700,color:"#166534"}}>{user.nombre||user.usuario}</div>
+              </div>
             </div>
             
             <div style={{height:1,background:C.bdr,margin:"14px 0"}}/>
@@ -761,17 +762,20 @@ function AppAlmacenero({user,onLogout,maestros,vales,setVales}){
               else if(equipo.tipo==="MONTACARGAS") glEsp=diferencia*teoRatio;
             }
             if(!glEsp||!kmActual) return(
-              <div style={{background:"#F3F4F6",border:"1px solid #E5E7EB",borderRadius:12,
-                padding:"12px 14px",marginBottom:12,display:"flex",alignItems:"center",gap:10}}>
-                <span style={{fontSize:20}}>📊</span>
+              <div style={{background:!ultimoKm&&kmActual?"#FEF9C3":"#F3F4F6",
+                border:`1px solid ${!ultimoKm&&kmActual?"#F59E0B":"#E5E7EB"}`,
+                borderRadius:12,padding:"12px 14px",marginBottom:12,display:"flex",alignItems:"center",gap:10}}>
+                <span style={{fontSize:20}}>{!ultimoKm&&kmActual?"🆕":"📊"}</span>
                 <div>
-                  <div style={{fontSize:12,fontWeight:600,color:C.txt2}}>
-                    Consumo ingresado: {gl.toFixed(1)} gl
+                  <div style={{fontSize:12,fontWeight:600,color:!ultimoKm&&kmActual?"#92400E":C.txt2}}>
+                    {!ultimoKm&&kmActual?"Primer registro de este equipo":"Consumo ingresado: "+(gl.toFixed(1))+" gl"}
                   </div>
-                  <div style={{fontSize:10,color:C.txt3}}>
+                  <div style={{fontSize:10,color:!ultimoKm&&kmActual?"#B45309":C.txt3}}>
                     {!kmActual
                       ?"Ingrese el Km/Horómetro actual para calcular el rango"
-                      :"Se usará el valor ingresado como referencia directa"}
+                      :!ultimoKm
+                        ?"Sin historial previo — este vale será la referencia base"
+                        :"Se usará el valor ingresado como referencia directa"}
                   </div>
                 </div>
               </div>
@@ -2647,7 +2651,7 @@ function AppGerente({user,onLogout,vales,setVales,users,setUsers,maestros}){
                 <div style={{marginBottom:10}}>
                   <label style={{fontSize:11,fontWeight:600,color:C.txt2,marginBottom:5,display:"block"}}>Cultivos asignados</label>
                   <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
-                    {["ESPARRAGO","ARANDANO","PIMIENTO","PALTA","PALTO","ALCACHOFA","OTROS"].map(c=>{
+                    {(maestros.cultivos||["ESPARRAGO","ARANDANO","PIMIENTO","PALTA","PALTO","ALCACHOFA","OTROS"]).map(c=>{
                       const sel=(newUser.cultivos||[]).includes(c);
                       return(<button key={c} onClick={()=>setNewUser(u=>({...u,cultivos:sel?(u.cultivos||[]).filter(x=>x!==c):[...(u.cultivos||[]),c]}))}
                         style={{padding:"3px 9px",borderRadius:20,fontSize:10,fontWeight:600,border:`1.5px solid ${sel?C.blue:C.bdr}`,background:sel?"#EFF6FF":"#fff",color:sel?C.blue:C.txt3,cursor:"pointer",fontFamily:"inherit"}}>{c}</button>);
@@ -2710,12 +2714,18 @@ export default function App(){
     try{ await guardarMaestros(m); }catch(e){ console.warn(e); }
   },[]);
 
+  const valesRefApp=useRef([]);
+  useEffect(()=>{ valesRefApp.current=vales; },[vales]);
+
   const setVales=useCallback(async(nuevos)=>{
     setValesState(nuevos);
-    // Guardar solo los vales que cambiaron
-    if(nuevos && nuevos.length>0){
-      const ultimo=nuevos[nuevos.length-1];
-      try{ await guardar("vales",ultimo.id,ultimo); }catch(e){ console.warn(e); }
+    // Guardar en Firebase solo los vales que cambiaron o son nuevos
+    const anteriores=valesRefApp.current||[];
+    for(const v of nuevos){
+      const ant=anteriores.find(a=>a.id===v.id);
+      if(!ant||JSON.stringify(ant)!==JSON.stringify(v)){
+        try{ await guardar("vales",String(v.id),v); }catch(e){ console.warn(e); }
+      }
     }
   },[]);
 
