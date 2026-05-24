@@ -2526,8 +2526,8 @@ function AppGerente({user,onLogout,vales,setVales,users,setUsers,maestros}){
         </div>
         <button onClick={onLogout} style={{marginLeft:"auto",background:"rgba(255,255,255,.1)",border:"none",borderRadius:7,color:"#fff",padding:"6px 12px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>Salir</button>
       </div>
-      <div style={{display:"flex",gap:6,padding:"12px 16px 0"}}>
-        {[["vales","📋 Registros"],["log","📜 Log auditoría"],["usuarios","👥 Usuarios"]].map(([t,l])=>(
+      <div style={{display:"flex",gap:6,padding:"12px 16px 0",flexWrap:"wrap"}}>
+        {[["vales","📋 Registros"],["log","📜 Log auditoría"],["usuarios","👥 Usuarios"],["params","⚙ Actividades/Ratios"]].map(([t,l])=>(
           <button key={t} onClick={()=>setView(t)} style={{padding:"8px 16px",borderRadius:8,border:`1.5px solid ${view===t?RED:C.bdr}`,background:view===t?RED:"#fff",color:view===t?"#fff":C.txt2,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"inherit"}}>{l}</button>
         ))}
       </div>
@@ -2725,19 +2725,17 @@ export default function App(){
   const [users,setUsersState]=useState(INIT_USERS);
   const [cargando,setCargando]=useState(true);
 
-  // ── Cargar datos desde Firebase al iniciar ────────────────────────────────
+  // ── Cargar y escuchar datos desde Firebase en tiempo real ─────────────────
   useEffect(()=>{
     let unsubVales=null;
+    let unsubConfig=null;
     (async()=>{
       try{
-        // Cargar maestros desde Firebase
+        // Carga inicial de maestros y usuarios
         const m = await obtenerMaestros();
         if(m && Object.keys(m).length>0) setMaestrosState(m);
-
-        // Cargar usuarios desde Firebase
         const u = await obtenerUsuarios();
         if(u && u.length>0) setUsersState(u);
-
       }catch(e){ console.warn("Error cargando config:",e); }
 
       // Escuchar vales en tiempo real
@@ -2745,9 +2743,22 @@ export default function App(){
         if(datos) setValesState(datos.sort((a,b)=>(a.id||0)-(b.id||0)));
       });
 
+      // Escuchar config en tiempo real (usuarios y maestros)
+      unsubConfig = escuchar("config", (docs)=>{
+        const maestrosDoc = docs.find(d=>d._fireId==="maestros");
+        const usuariosDoc = docs.find(d=>d._fireId==="usuarios");
+        if(maestrosDoc && Object.keys(maestrosDoc).length>1){
+          const {_fireId, _updatedAt, ...m} = maestrosDoc;
+          setMaestrosState(m);
+        }
+        if(usuariosDoc && usuariosDoc.lista){
+          setUsersState(usuariosDoc.lista);
+        }
+      });
+
       setCargando(false);
     })();
-    return ()=>{ if(unsubVales) unsubVales(); };
+    return ()=>{ if(unsubVales) unsubVales(); if(unsubConfig) unsubConfig(); };
   },[]);
 
   const setMaestros=useCallback(async(m)=>{
