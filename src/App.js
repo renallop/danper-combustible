@@ -1114,8 +1114,9 @@ const buildUnified=(vales)=>{
     ...HIST_DEFICITS.map(r=>({...r,fuente:"hist",aprobado:null,rechazado:null,gl_real:r.gl,gl_esp:r.es,diff:r.df,nVale:"—"})),
   ];
   const nuevos=vales.map(v=>{
-    const dif=v.diferencia||v.km||0;
-    const glEsp=v.teoRatio&&dif?(v.teoUnit==="Km/Gl"?dif/v.teoRatio:dif*v.teoRatio):null;
+    const tienePrevio = v.kmAnterior && v.kmAnterior > 0;
+    const dif = tienePrevio ? (v.diferencia||0) : 0;
+    const glEsp = (v.teoRatio && dif > 0) ? (v.teoUnit==="Km/Gl"?dif/v.teoRatio:dif*v.teoRatio) : null;
     const diff=glEsp?v.gl-glEsp:null;
     const af=diff==null?null:diff>5?"exceso":diff<-5?"deficit":null;
     return{id:v.equipoId,ef:v.equipoDen,
@@ -1604,7 +1605,6 @@ function DashboardPlanner({user,onLogout,maestros,setMaestros,vales,users,setUse
     {id:"excesos",  label:"Excesos",   ico:"⬆"},
     {id:"deficits", label:"Déficits",  ico:"⬇"},
     {id:"todos",    label:"Todos",     ico:"📋",badge:vales.length},
-    {id:"usuarios", label:"Usuarios",  ico:"👥"},
     {id:"mant",     label:"Parámetros",ico:"⚙"},
   ];
   const fsel={fontSize:11,padding:"5px 8px",borderRadius:8,border:`1px solid ${C.bdr}`,
@@ -2215,7 +2215,47 @@ function DashboardPlanner({user,onLogout,maestros,setMaestros,vales,users,setUse
               <MantList k="fundos" label="🌾 Fundos"/>
               <MantList k="cultivos" label="🌱 Cultivos"/>
               <MantList k="almaceneros" label="🧑‍🔧 Almaceneros"/>
-              <MantActividadesCard maestros={maestros} setMaestros={setMaestros} setToast={setToast}/>
+              {/* Actividades — solo lectura para el Planner */}
+              <div style={{background:C.surf,border:`1px solid ${C.bdr}`,borderRadius:12,padding:16,
+                boxShadow:"0 1px 3px rgba(0,0,0,.06)",gridColumn:"1 / -1"}}>
+                <div style={{fontSize:13,fontWeight:700,marginBottom:4,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <span>⚙ Actividades y ratios de consumo</span>
+                  <span style={{fontSize:10,color:C.txt3,background:"#FEF3C7",padding:"2px 8px",borderRadius:6,border:"1px solid #F59E0B"}}>
+                    ✎ Solo el Gerente puede editar ratios
+                  </span>
+                </div>
+                <div style={{fontSize:11,color:C.txt3,marginBottom:10}}>{(maestros.actividades||[]).length} actividades configuradas</div>
+                <div style={{overflowX:"auto",maxHeight:280,overflowY:"auto",borderRadius:8,border:`1px solid ${C.bdr}`}}>
+                  <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+                    <thead style={{position:"sticky",top:0}}>
+                      <tr style={{background:C.surf2,borderBottom:`1px solid ${C.bdr}`}}>
+                        {["Actividad","Ratio","Unidad","Aplica a"].map(h=>(
+                          <th key={h} style={{padding:"7px 10px",textAlign:"left",fontSize:10,fontWeight:700,color:C.txt3,textTransform:"uppercase",letterSpacing:.4}}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(maestros.actividades||[]).map((a,i)=>(
+                        <tr key={a.nombre||i} style={{borderBottom:`0.5px solid ${C.bdr}`,background:i%2===0?"#fff":C.surf2}}>
+                          <td style={{padding:"6px 10px",fontWeight:500}}>{a.nombre||a}</td>
+                          <td style={{padding:"6px 10px",fontFamily:"monospace",fontWeight:700,color:C.navy,textAlign:"right"}}>{a.ratio||"—"}</td>
+                          <td style={{padding:"6px 10px",color:C.txt3}}>{a.unit||"—"}</td>
+                          <td style={{padding:"6px 10px"}}>
+                            <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
+                              {(a.tipos||[]).map(t=>(
+                                <span key={t} style={{fontSize:9,padding:"1px 5px",borderRadius:3,
+                                  background:t==="TRACTOR"?"#DBEAFE":t==="CAMION"?"#D1FAE5":t==="CISTERNA"?"#FEE2E2":"#FEF9C3",
+                                  color:t==="TRACTOR"?"#1e3a8a":t==="CAMION"?"#064e3b":t==="CISTERNA"?"#7f1d1d":"#713f12",
+                                  fontWeight:700}}>{t}</span>
+                              ))}
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
               <MantChoferesCard maestros={maestros} setMaestros={setMaestros} setToast={setToast}/>
               <div style={{background:C.surf,border:`1px solid ${C.bdr}`,borderRadius:12,padding:16}}>
                 <div style={{fontSize:13,fontWeight:700,marginBottom:10}}>🚛 Equipos <span style={{fontSize:11,color:C.txt3,fontWeight:400}}>({(maestros.equipos||[]).length})</span></div>
@@ -2290,8 +2330,9 @@ function AppAprobador({user,onLogout,vales,setVales,users,precioPorGalon=18.5}){
   const ValeCard=({v})=>{
     const [notas,setNotas]=useState("");
     const plazoOk=dentro24h(v);
-    const dif=v.diferencia||v.km||0;
-    const glEsp=v.teoRatio&&dif?(v.teoUnit==="Km/Gl"?dif/v.teoRatio:dif*v.teoRatio):null;
+    const tienePrevio = v.kmAnterior && v.kmAnterior > 0;
+    const dif = tienePrevio ? (v.diferencia||0) : 0;
+    const glEsp = (v.teoRatio && dif > 0) ? (v.teoUnit==="Km/Gl"?dif/v.teoRatio:dif*v.teoRatio) : null;
     const diffNum=glEsp?v.gl-glEsp:null;
     const desvPct=glEsp?((v.gl-glEsp)/glEsp)*100:null;
     const absDesv=desvPct!=null?Math.abs(desvPct):null;
