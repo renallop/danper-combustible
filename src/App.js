@@ -410,6 +410,11 @@ function FirmaCanvas({label, value, onChange}){
 function AppAlmacenero({user,onLogout,maestros,vales,setVales}){
   const [tab,setTab]=useState("nuevo");
   const [toast,setToast]=useState({msg:""});
+  const [candadoOk,setCandadoOk]=useState(null);       // null=sin verificar, true=OK, false=problema
+  const [showCandadoModal,setShowCandadoModal]=useState(false);
+  const [incidenteFoto,setIncidenteFoto]=useState(null);
+  const [incidenteNota,setIncidenteNota]=useState("");
+  const [incidenteEnviado,setIncidenteEnviado]=useState(false);
   const [tipoFiltro,setTipoFiltro]=useState("");
   const [form,setForm]=useState({
     fundo:"",equipoId:"",km:"",actividad:"",cultivo:"",
@@ -499,6 +504,10 @@ function AppAlmacenero({user,onLogout,maestros,vales,setVales}){
     setForm({fundo:"",equipoId:"",km:"",actividad:"",cultivo:"",almacenero:user.nombre||user.usuario,chofer:"",obs:"",producto:"",galones:""});
     setFotoMedidor(null);
     setTipoFiltro("");
+    setCandadoOk(null);
+    setIncidenteNota("");
+    setIncidenteFoto(null);
+    setIncidenteEnviado(false);
     setShowAlerta(false);
     setToast({msg:showAlerta?"✓ Vale registrado · ⚠ Alerta de exceso":"✓ Vale registrado",type:showAlerta?"warn":"ok"});
   };
@@ -1442,6 +1451,14 @@ function DashboardPlanner({user,onLogout,maestros,setMaestros,vales,users,setUse
   const [drawer,setDrawer]=useState(null);
   const [drawerTab,setDrawerTab]=useState("hist");
   const [rFiltro,setRFiltro]=useState({tipo:"",fundo:"",cultivo:""});
+  const [incidentes,setIncidentes]=useState([]);
+  // Cargar incidentes desde Firebase
+  useEffect(()=>{
+    const unsub = escuchar("incidentes",(datos)=>{
+      setIncidentes(datos.sort((a,b)=>b.timestamp?.localeCompare(a.timestamp||"")));
+    });
+    return ()=>unsub();
+  },[]);
   const [sortCol,setSortCol]=useState("diff");
   const [sortDir,setSortDir]=useState(-1);
   const [showGraf,setShowGraf]=useState(true);
@@ -1601,11 +1618,12 @@ function DashboardPlanner({user,onLogout,maestros,setMaestros,vales,users,setUse
     });
   };
   const navItems=[
-    {id:"resumen",  label:"Resumen",   ico:"◉"},
-    {id:"excesos",  label:"Excesos",   ico:"⬆"},
-    {id:"deficits", label:"Déficits",  ico:"⬇"},
-    {id:"todos",    label:"Todos",     ico:"📋",badge:vales.length},
-    {id:"mant",     label:"Parámetros",ico:"⚙"},
+    {id:"resumen",    label:"Resumen",    ico:"◉"},
+    {id:"excesos",    label:"Excesos",    ico:"⬆"},
+    {id:"deficits",   label:"Déficits",   ico:"⬇"},
+    {id:"todos",      label:"Todos",      ico:"📋",badge:vales.length},
+    {id:"incidentes", label:"Incidentes", ico:"⚠️",badge:incidentes.filter(i=>!i.revisado).length||0},
+    {id:"mant",       label:"Parámetros", ico:"⚙"},
   ];
   const fsel={fontSize:11,padding:"5px 8px",borderRadius:8,border:`1px solid ${C.bdr}`,
     background:C.surf2,fontFamily:"inherit",color:C.txt,WebkitAppearance:"none"};
@@ -2124,6 +2142,7 @@ function DashboardPlanner({user,onLogout,maestros,setMaestros,vales,users,setUse
                             <SortTh col="gl" label="Galones" right/>
                             <SortTh col="chofer" label="Chofer"/>
                             <th style={{padding:"7px 10px",fontSize:10,fontWeight:700,color:C.txt3,textTransform:"uppercase",letterSpacing:.4,whiteSpace:"nowrap",background:C.surf2}}>Estado</th>
+                            <th style={{padding:"7px 10px",fontSize:10,fontWeight:700,color:C.txt3,textTransform:"uppercase",letterSpacing:.4,whiteSpace:"nowrap",background:C.surf2}}>🔒</th>
                             <th style={{padding:"7px 10px",fontSize:10,fontWeight:700,color:C.txt3,textTransform:"uppercase",letterSpacing:.4,whiteSpace:"nowrap",background:C.surf2}}>📸 Medidor</th>
                           </tr>
                         </thead>
@@ -2145,6 +2164,9 @@ function DashboardPlanner({user,onLogout,maestros,setMaestros,vales,users,setUse
                                 <td style={{padding:"7px 10px",fontFamily:"monospace",color:C.blue,fontWeight:700,textAlign:"right"}}>{v.gl.toFixed(1)} gl</td>
                                 <td style={{padding:"7px 10px",fontWeight:600}}>{v.chofer}</td>
                                 <td style={{padding:"7px 10px"}}>{v.aprobado?<span style={{color:C.ok,fontSize:11,fontWeight:700}}>✅ Aprobado</span>:v.rechazado?<span style={{color:C.crit,fontSize:11,fontWeight:700}}>✕ Rechazado</span>:<span style={{color:C.warn,fontSize:11,fontWeight:700}}>⏳ Pendiente</span>}</td>
+                                <td style={{padding:"7px 8px",textAlign:"center",fontSize:16}} title={v.candadoVerificado===true?"Candado OK":v.candadoVerificado===false?"⚠ Incidente reportado":"Sin verificar"}>
+                                  {v.candadoVerificado===true?"🔒✅":v.candadoVerificado===false?"🔓⚠️":"—"}
+                                </td>
                                 <td style={{padding:"5px 8px",textAlign:"center"}}>
                                   {v.fotoMedidor
                                     ?<img
@@ -2159,7 +2181,7 @@ function DashboardPlanner({user,onLogout,maestros,setMaestros,vales,users,setUse
                               </tr>
                             );
                           })}
-                          {rows.length===0&&<tr><td colSpan={10} style={{textAlign:"center",padding:"28px",color:C.txt3}}>Sin registros para los filtros seleccionados</td></tr>}
+                          {rows.length===0&&<tr><td colSpan={11} style={{textAlign:"center",padding:"28px",color:C.txt3}}>Sin registros para los filtros seleccionados</td></tr>}
                         </tbody>
                       </table>
                     </div>
