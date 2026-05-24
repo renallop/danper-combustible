@@ -2676,7 +2676,7 @@ function GerMantActividadesCard({maestros,guardarMaestros,setToast}){
   );
 }
 
-function AppGerente({user,onLogout,vales,setVales,users,setUsers,maestros}){
+function AppGerente({user,onLogout,vales,setVales,users,setUsers,maestros:maestrosProp}){
   const [view,setView]=useState("vales");
   const [toast,setToast]=useState({msg:""});
   const [editId,setEditId]=useState(null);
@@ -2686,6 +2686,22 @@ function AppGerente({user,onLogout,vales,setVales,users,setUsers,maestros}){
   const [editUser,setEditUser]=useState(null);
   const [newUser,setNewUser]=useState({usuario:"",pass:"",nombre:"",rol:"alm",cultivos:[]});
   const RED="#C8102E";
+  // Cargar maestros propios desde Firebase (no depender del prop del padre)
+  const [maestros,setMaestrosLocal]=useState(maestrosProp||{});
+  useEffect(()=>{
+    obtenerMaestros().then(m=>{
+      if(m && Object.keys(m).length>0) setMaestrosLocal(m);
+    }).catch(e=>console.warn(e));
+    // Escuchar cambios en tiempo real
+    const unsub = escuchar("config",(docs)=>{
+      const mDoc=docs.find(d=>d._fireId==="maestros");
+      if(mDoc){
+        const {_fireId,_updatedAt,...m}=mDoc;
+        if(Object.keys(m).length>0) setMaestrosLocal(m);
+      }
+    });
+    return ()=>unsub();
+  },[]);
   const auditLog=vales.flatMap(v=>(v._log||[]).map(l=>({...l,valeId:v.id,nVale:v.nVale,equipo:v.equipoDen}))).sort((a,b)=>b.ts.localeCompare(a.ts));
   const startEdit=(v)=>{setEditId(v.id);setEditData({gl:v.gl,km:v.km,actividad:v.actividad,fundo:v.fundo,cultivo:v.cultivo,producto:v.producto,obs:v.obs||"",chofer:v.chofer});setEditMotivo("");};
   const saveEdit=async()=>{
