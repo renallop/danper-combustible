@@ -2495,6 +2495,165 @@ function AppAprobador({user,onLogout,vales,setVales,users,precioPorGalon=18.5}){
     </div>
   );
 }
+
+// ─── GERENTE: MantActividadesCard con acceso total ────────────────────────────
+function GerMantActividadesCard({maestros,guardarMaestros,setToast}){
+  const acts = maestros.actividades||[];
+  const [editIdx,setEditIdx] = useState(null);
+  const [editData,setEditData] = useState({});
+  const [newAct,setNewAct] = useState({nombre:"",ratio:"",unit:"Gl/Hr",tipos:[]});
+  const inp = {width:"100%",padding:"6px 8px",border:`1px solid ${C.bdr}`,borderRadius:6,fontSize:12,fontFamily:"inherit",outline:"none"};
+
+  const save = async(newActs) => {
+    const m = {...maestros, actividades: newActs};
+    try{ await guardarMaestros(m); setToast({msg:"✓ Guardado en Firebase",type:"ok"}); }
+    catch(e){ setToast({msg:"Error: "+e.message,type:"err"}); }
+  };
+
+  const delAct = async(i) => {
+    if(!window.confirm("¿Eliminar esta actividad?")) return;
+    const arr=[...acts]; arr.splice(i,1); await save(arr);
+  };
+
+  const startEdit = (i) => {
+    setEditIdx(i);
+    setEditData({...acts[i]});
+  };
+
+  const saveEdit = async() => {
+    if(!editData.nombre||!editData.ratio){ setToast({msg:"Complete nombre y ratio",type:"err"}); return; }
+    const arr=[...acts];
+    arr[editIdx]={...editData,ratio:parseFloat(editData.ratio)||0};
+    await save(arr); setEditIdx(null);
+  };
+
+  const addAct = async() => {
+    if(!newAct.nombre||!newAct.ratio||newAct.tipos.length===0){
+      setToast({msg:"Complete nombre, ratio y al menos un tipo",type:"err"}); return;
+    }
+    const arr=[...acts,{...newAct,ratio:parseFloat(newAct.ratio)||0}]
+      .sort((a,b)=>a.nombre.localeCompare(b.nombre));
+    await save(arr);
+    setNewAct({nombre:"",ratio:"",unit:"Gl/Hr",tipos:[]});
+  };
+
+  const TIPOS=["TRACTOR","CAMION","CISTERNA","MONTACARGAS"];
+  const UNITS=["Gl/Hr","Km/Gl"];
+  const tipoBadge={TRACTOR:"#DBEAFE",CAMION:"#D1FAE5",CISTERNA:"#FEE2E2",MONTACARGAS:"#FEF9C3"};
+  const tipoColor={TRACTOR:"#1e3a8a",CAMION:"#064e3b",CISTERNA:"#7f1d1d",MONTACARGAS:"#713f12"};
+
+  return(
+    <div style={{background:C.surf,border:`1px solid ${C.bdr}`,borderRadius:12,padding:16}}>
+      <div style={{fontSize:13,fontWeight:700,marginBottom:14}}>⚙ Actividades y ratios de consumo ({acts.length})</div>
+      <div style={{maxHeight:320,overflowY:"auto",marginBottom:14,border:`1px solid ${C.bdr}`,borderRadius:8}}>
+        <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+          <thead style={{position:"sticky",top:0}}>
+            <tr style={{background:C.surf2,borderBottom:`1px solid ${C.bdr}`}}>
+              {["Actividad","Ratio","Unidad","Tipos",""].map(h=>(
+                <th key={h} style={{padding:"7px 10px",textAlign:"left",fontSize:10,fontWeight:700,color:C.txt3,textTransform:"uppercase",letterSpacing:.4}}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {acts.map((a,i)=>(
+              <tr key={i} style={{borderBottom:`0.5px solid ${C.bdr}`,background:i%2===0?"#fff":C.surf2}}>
+                {editIdx===i?(
+                  <>
+                    <td style={{padding:"5px 8px"}}><input value={editData.nombre} onChange={e=>setEditData(d=>({...d,nombre:e.target.value}))} style={inp}/></td>
+                    <td style={{padding:"5px 8px"}}><input type="number" step="0.1" value={editData.ratio} onChange={e=>setEditData(d=>({...d,ratio:e.target.value}))} style={{...inp,width:70}}/></td>
+                    <td style={{padding:"5px 8px"}}>
+                      <select value={editData.unit} onChange={e=>setEditData(d=>({...d,unit:e.target.value}))} style={{...inp,WebkitAppearance:"none",width:80}}>
+                        {UNITS.map(u=><option key={u} value={u}>{u}</option>)}
+                      </select>
+                    </td>
+                    <td style={{padding:"5px 8px"}}>
+                      <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
+                        {TIPOS.map(t=>{
+                          const sel=(editData.tipos||[]).includes(t);
+                          return(<button key={t} onClick={()=>setEditData(d=>({...d,tipos:sel?(d.tipos||[]).filter(x=>x!==t):[...(d.tipos||[]),t]}))}
+                            style={{fontSize:9,padding:"2px 6px",borderRadius:3,border:`1px solid ${sel?"#2563EB":C.bdr}`,background:sel?"#DBEAFE":"#fff",color:sel?"#1e3a8a":C.txt3,cursor:"pointer",fontFamily:"inherit"}}>{t}</button>);
+                        })}
+                      </div>
+                    </td>
+                    <td style={{padding:"5px 8px"}}>
+                      <div style={{display:"flex",gap:4}}>
+                        <button onClick={saveEdit} style={{fontSize:10,padding:"3px 8px",background:C.ok,color:"#fff",border:"none",borderRadius:5,cursor:"pointer",fontFamily:"inherit"}}>✓</button>
+                        <button onClick={()=>setEditIdx(null)} style={{fontSize:10,padding:"3px 8px",background:C.surf2,border:`1px solid ${C.bdr}`,borderRadius:5,cursor:"pointer",fontFamily:"inherit"}}>✕</button>
+                      </div>
+                    </td>
+                  </>
+                ):(
+                  <>
+                    <td style={{padding:"6px 10px",fontWeight:500}}>{a.nombre}</td>
+                    <td style={{padding:"6px 10px",fontFamily:"monospace",fontWeight:700,color:C.navy,textAlign:"right"}}>{a.ratio}</td>
+                    <td style={{padding:"6px 10px",color:C.txt3}}>{a.unit}</td>
+                    <td style={{padding:"6px 10px"}}>
+                      <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
+                        {(a.tipos||[]).map(t=>(
+                          <span key={t} style={{fontSize:9,padding:"1px 5px",borderRadius:3,fontWeight:700,background:tipoBadge[t]||"#F3F4F6",color:tipoColor[t]||"#374151"}}>{t}</span>
+                        ))}
+                      </div>
+                    </td>
+                    <td style={{padding:"6px 8px"}}>
+                      <div style={{display:"flex",gap:4}}>
+                        <button onClick={()=>startEdit(i)} style={{fontSize:10,padding:"2px 8px",background:C.blue,color:"#fff",border:"none",borderRadius:5,cursor:"pointer",fontFamily:"inherit"}}>✎</button>
+                        <button onClick={()=>delAct(i)} style={{fontSize:10,padding:"2px 8px",background:"#FEE2E2",color:"#DC2626",border:"1px solid #FCA5A5",borderRadius:5,cursor:"pointer",fontFamily:"inherit"}}>✕</button>
+                      </div>
+                    </td>
+                  </>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {/* Nueva actividad */}
+      <div style={{background:"#F8FAFC",border:`1px dashed ${C.bdr}`,borderRadius:10,padding:12}}>
+        <div style={{fontSize:11,fontWeight:700,color:C.txt2,marginBottom:8}}>+ Nueva actividad</div>
+        <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr",gap:8,marginBottom:8}}>
+          <div>
+            <label style={{fontSize:10,color:C.txt3,display:"block",marginBottom:3}}>Nombre</label>
+            <input value={newAct.nombre} onChange={e=>setNewAct(a=>({...a,nombre:e.target.value}))}
+              placeholder="Ej. Chapodo Mecanizado - Rotativa" style={inp}/>
+          </div>
+          <div>
+            <label style={{fontSize:10,color:C.txt3,display:"block",marginBottom:3}}>Ratio</label>
+            <input type="number" step="0.1" value={newAct.ratio} onChange={e=>setNewAct(a=>({...a,ratio:e.target.value}))}
+              placeholder="2.5" style={inp}/>
+          </div>
+          <div>
+            <label style={{fontSize:10,color:C.txt3,display:"block",marginBottom:3}}>Unidad</label>
+            <select value={newAct.unit} onChange={e=>setNewAct(a=>({...a,unit:e.target.value}))}
+              style={{...inp,WebkitAppearance:"none"}}>
+              {UNITS.map(u=><option key={u} value={u}>{u}</option>)}
+            </select>
+          </div>
+        </div>
+        <div style={{marginBottom:8}}>
+          <label style={{fontSize:10,color:C.txt3,display:"block",marginBottom:5}}>Aplica a (seleccionar al menos uno)</label>
+          <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+            {TIPOS.map(t=>{
+              const sel=(newAct.tipos||[]).includes(t);
+              return(<button key={t} onClick={()=>setNewAct(a=>({...a,tipos:sel?(a.tipos||[]).filter(x=>x!==t):[...(a.tipos||[]),t]}))}
+                style={{padding:"4px 10px",borderRadius:20,fontSize:11,fontWeight:600,
+                  border:`1.5px solid ${sel?C.blue:C.bdr}`,background:sel?"#EFF6FF":"#fff",
+                  color:sel?C.blue:C.txt3,cursor:"pointer",fontFamily:"inherit"}}>
+                {t==="TRACTOR"?"🚜":t==="CAMION"?"🚛":t==="CISTERNA"?"🚰":"🛺"} {t}
+              </button>);
+            })}
+          </div>
+        </div>
+        <button onClick={addAct}
+          style={{padding:"8px 20px",background:`linear-gradient(135deg,${C.navy},${C.blue})`,
+            color:"#fff",border:"none",borderRadius:8,fontSize:12,fontWeight:700,
+            cursor:"pointer",fontFamily:"inherit"}}>
+          + Agregar actividad
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function AppGerente({user,onLogout,vales,setVales,users,setUsers,maestros}){
   const [view,setView]=useState("vales");
   const [toast,setToast]=useState({msg:""});
