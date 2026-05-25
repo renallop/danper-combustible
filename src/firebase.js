@@ -107,3 +107,36 @@ export async function reservarSiguienteVale() {
     return actual; // este es el número que el cliente usará
   });
 }
+
+// Libera un número de vale previamente reservado, cuando el guardado del vale
+// falló. Esto evita huecos en la numeración (ej. V-000014, V-000016...) que
+// rompen auditoría SAP.
+//
+// Lógica de la transacción:
+//  - Si el contador actual en Firestore es exactamente `numero+1`, significa
+//    que nadie más reservó después de nosotros → lo devolvemos a `numero`.
+//  - Si el contador ya avanzó más (otro almacenero reservó en paralelo), NO
+//    tocamos nada — sería pisar su reserva y generar duplicados. En ese caso
+//    el hueco es inevitable, pero solo bajo concurrencia real.
+//
+// Devuelve true si pudo liberar, false si no (por concurrencia).
+export async function liberarVale(numero) {
+  if (numero == null || numero < 1) return false;
+  const ref = doc(db, "config", "counter");
+  try {
+    return await runTransaction(db, async (tx) => {
+      const snap = await tx.get(ref);
+      if (!snap.exists()) return false;
+      const actual = snap.data().valeNum || 1;
+      // Solo liberar si nadie más reservó después
+      if (actual === numero + 1) {
+        tx.set(ref, { valeNum: numero, _updatedAt: new Date().toISOString() }, { merge: true });
+        return true;
+      }
+      return false;
+    });
+  } catch (e) {
+    console.warn("Error al liberar vale", numero, e);
+    return false;
+  }
+}

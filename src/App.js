@@ -1,7 +1,7 @@
 /* eslint-disable */
 import { useState, useEffect, useCallback, useRef } from "react";
 import * as XLSX from "xlsx";
-import { guardar, obtenerTodos, escuchar, guardarMaestros, obtenerMaestros, guardarUsuarios, obtenerUsuarios, guardarCounter, obtenerCounter, reservarSiguienteVale } from "./firebase";
+import { guardar, obtenerTodos, escuchar, guardarMaestros, obtenerMaestros, guardarUsuarios, obtenerUsuarios, guardarCounter, obtenerCounter, reservarSiguienteVale, liberarVale } from "./firebase";
 const CSS_GLOBAL = `*{box-sizing:border-box}input::placeholder{color:rgba(255,255,255,.4)}@keyframes fadeUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}`;
 const CSS_DRAWER = `@keyframes fadeIn{from{opacity:0}to{opacity:1}}@keyframes slideIn{from{transform:translateX(60px);opacity:0}to{transform:none;opacity:1}}`;
 const CSS_DASH = `*{box-sizing:border-box}::-webkit-scrollbar{width:4px;height:4px}::-webkit-scrollbar-thumb{background:#ccc;border-radius:2px}select{-webkit-appearance:none}`;
@@ -172,21 +172,13 @@ function KCard({label,value,sub,color,accent}){
   );
 }
 function Toast({msg,type,onClose}){
-  // Errores requieren más tiempo para que el usuario los lea (8s vs 3.2s)
-  useEffect(()=>{
-    if(!msg) return;
-    const ms = type==="err" ? 8000 : 3200;
-    const t = setTimeout(onClose, ms);
-    return ()=>clearTimeout(t);
-  },[msg,type]);
+  useEffect(()=>{if(!msg)return;const t=setTimeout(onClose,3200);return()=>clearTimeout(t);},[msg]);
   if(!msg)return null;
   const bg=type==="ok"?C.ok:type==="err"?C.crit:type==="warn"?C.warn:C.navy;
   return(
     <div style={{position:"fixed",bottom:24,left:"50%",transform:"translateX(-50%)",
       background:bg,color:"#fff",padding:"11px 20px",borderRadius:12,fontSize:13,
-      fontWeight:500,zIndex:9999,boxShadow:"0 4px 20px rgba(0,0,0,.25)",
-      maxWidth:"90vw",textAlign:"center",lineHeight:1.4,cursor:"pointer"}}
-      onClick={onClose} title="Clic para cerrar">
+      fontWeight:500,zIndex:9999,boxShadow:"0 4px 20px rgba(0,0,0,.25)",whiteSpace:"nowrap"}}>
       {msg}
     </div>
   );
@@ -407,96 +399,6 @@ function FirmaCanvas({label, value, onChange}){
     </div>
   );
 }
-// ─── HELPERS GLOBALES ────────────────────────────────────────────────────────
-// Comprime una imagen data URL reduciendo dimensiones y calidad JPEG, para que
-// el documento Firestore no supere el límite de 1 MB. Mantiene la relación de
-// aspecto. Recibe un dataURL y devuelve un dataURL JPEG comprimido.
-function comprimirImagen(dataUrl, maxLado=900, calidad=0.7){
-  return new Promise((resolve,reject)=>{
-    if(!dataUrl){ resolve(null); return; }
-    const img = new Image();
-    img.onload = () => {
-      try{
-        let {width:w, height:h} = img;
-        if(w > maxLado || h > maxLado){
-          const r = w > h ? maxLado/w : maxLado/h;
-          w = Math.round(w*r); h = Math.round(h*r);
-        }
-        const canvas = document.createElement("canvas");
-        canvas.width = w; canvas.height = h;
-        const ctx = canvas.getContext("2d");
-        ctx.drawImage(img, 0, 0, w, h);
-        resolve(canvas.toDataURL("image/jpeg", calidad));
-      }catch(e){ reject(e); }
-    };
-    img.onerror = reject;
-    img.src = dataUrl;
-  });
-}
-
-// Elimina recursivamente claves con valor undefined de un objeto/array.
-// Firestore rechaza el documento completo si encuentra undefined en cualquier
-// campo. Esta función es un cinturón de seguridad por si alguna actualización
-// futura olvida sanear algún valor.
-function limpiarUndefined(v){
-  if(Array.isArray(v)) return v.map(limpiarUndefined);
-  if(v && typeof v==="object"){
-    const o={};
-    for(const [k,val] of Object.entries(v)){
-      if(val===undefined) continue;
-      o[k] = limpiarUndefined(val);
-    }
-    return o;
-  }
-  return v;
-}
-
-// Abre una imagen (incluso data URLs) en un lightbox modal a pantalla completa.
-// Usamos esto en lugar de window.open() porque los navegadores modernos
-// (Chrome, Safari, Firefox) bloquean window.open con data URLs por seguridad
-// anti-phishing desde 2017. El lightbox usa DOM puro para poder llamarse
-// desde cualquier handler sin necesitar useState en cada componente.
-function verImagenAmpliada(src){
-  if(!src) return;
-  // Evitar duplicados si ya hay un lightbox abierto
-  const existente = document.getElementById("__lightbox_foto__");
-  if(existente) existente.remove();
-  const overlay = document.createElement("div");
-  overlay.id = "__lightbox_foto__";
-  Object.assign(overlay.style, {
-    position:"fixed", inset:"0", background:"rgba(0,0,0,0.92)",
-    display:"flex", alignItems:"center", justifyContent:"center",
-    zIndex:"99999", cursor:"zoom-out", padding:"20px",
-    animation:"fadeIn .15s ease",
-  });
-  const img = document.createElement("img");
-  img.src = src;
-  img.alt = "Foto ampliada";
-  Object.assign(img.style, {
-    maxWidth:"100%", maxHeight:"100%", objectFit:"contain",
-    boxShadow:"0 10px 40px rgba(0,0,0,.6)", borderRadius:"8px",
-  });
-  const close = document.createElement("button");
-  close.innerHTML = "✕";
-  Object.assign(close.style, {
-    position:"absolute", top:"16px", right:"16px",
-    background:"rgba(255,255,255,.15)", color:"#fff",
-    border:"1px solid rgba(255,255,255,.3)", borderRadius:"50%",
-    width:"40px", height:"40px", fontSize:"18px", cursor:"pointer",
-    fontFamily:"inherit",
-  });
-  const cerrar = () => overlay.remove();
-  overlay.addEventListener("click", cerrar);
-  close.addEventListener("click", e => { e.stopPropagation(); cerrar(); });
-  img.addEventListener("click", e => e.stopPropagation()); // no cerrar al clickear la imagen
-  // Cerrar con tecla Escape
-  const onKey = (e) => { if(e.key==="Escape"){ cerrar(); document.removeEventListener("keydown",onKey); } };
-  document.addEventListener("keydown", onKey);
-  overlay.appendChild(img);
-  overlay.appendChild(close);
-  document.body.appendChild(overlay);
-}
-
 function AppAlmacenero({user,onLogout,maestros,vales,setVales}){
   const [tab,setTab]=useState("nuevo");
   const [toast,setToast]=useState({msg:""});
@@ -560,9 +462,6 @@ function AppAlmacenero({user,onLogout,maestros,vales,setVales}){
     if(!form.fundo||!form.equipoId||!form.actividad||!form.chofer){
       setToast({msg:"Complete todos los campos obligatorios (*)",type:"err"});return;
     }
-    if(!form.cultivo){
-      setToast({msg:"Seleccione el cultivo (obligatorio)",type:"err"});return;
-    }
     if(!form.producto){setToast({msg:"Seleccione un tipo de combustible",type:"err"});return;}
     if(gl<=0){setToast({msg:"Ingrese los galones despachados",type:"err"});return;}
 
@@ -579,21 +478,6 @@ function AppAlmacenero({user,onLogout,maestros,vales,setVales}){
     }
     setValeNum(numeroReservado + 1);
 
-    // Comprimir foto del medidor antes de guardar.
-    // Firestore tiene un límite duro de 1 MB por documento. Una foto sin
-    // comprimir en data URL fácilmente supera ese tamaño y el vale se rechaza
-    // con "Document too large", haciendo que NO aparezca en el dashboard.
-    let fotoComprimida = fotoMedidor;
-    if(fotoMedidor){
-      try{ fotoComprimida = await comprimirImagen(fotoMedidor, 900, 0.7); }
-      catch(e){ console.warn("No se pudo comprimir la foto:",e); }
-    }
-    let incidenteFotoComp = incidenteFoto;
-    if(incidenteFoto){
-      try{ incidenteFotoComp = await comprimirImagen(incidenteFoto, 900, 0.7); }
-      catch(e){ console.warn("No se pudo comprimir la foto del incidente:",e); }
-    }
-
     const now=new Date();
     const vale={
       id:numeroReservado,
@@ -603,18 +487,14 @@ function AppAlmacenero({user,onLogout,maestros,vales,setVales}){
       fundo:form.fundo,
       equipoId:form.equipoId,
       equipoDen:equipo?.den||"",
-      tipo:equipo?.tipo||tipoFiltro||"",
+      tipo:equipo?.tipo||tipoFiltro,
       placa:equipo?.placa||"",
       km:parseFloat(form.km)||0,
       actividad:form.actividad,
       cultivo:form.cultivo,
       producto:form.producto,
       gl,
-      // Saneo: nunca dejar undefined en estos campos — Firestore rechaza el
-      // documento entero si encuentra undefined en cualquier propiedad.
-      teoRatio: teoRatio||null,
-      teoUnit:  teoUnit||"Gl/Hr",
-      actividadObj: actObj||null,
+      teoRatio, teoUnit, actividadObj: actObj,
       kmAnterior: ultimoKm||null,
       diferencia: (()=>{
         const kma=parseFloat(form.km)||0;
@@ -622,28 +502,48 @@ function AppAlmacenero({user,onLogout,maestros,vales,setVales}){
         if(!ultimoKm || kma<=ultimoKm) return null;
         return kma-ultimoKm;
       })(),
-      obs:form.obs||"",
-      almacenero:form.almacenero||"",
+      obs:form.obs,
+      almacenero:form.almacenero,
       chofer:form.chofer,
-      registradoPor:user.nombre||user.usuario||"",
-      alertaEnviada:!!showAlerta,
-      fotoMedidor:fotoComprimida||null,
+      registradoPor:user.nombre||user.usuario,
+      alertaEnviada:showAlerta,
+      fotoMedidor:fotoMedidor||null,
       // Trazabilidad del candado de seguridad
       candadoOk:candadoOk,
-      incidenteNota:candadoOk===false?(incidenteNota||""):"",
-      incidenteFoto:candadoOk===false?(incidenteFotoComp||null):null,
+      incidenteNota:candadoOk===false?incidenteNota:"",
+      incidenteFoto:candadoOk===false?incidenteFoto:null,
     };
     const nuevos=[...vales,vale];
-    // Si falla la escritura del vale en Firebase mostramos el error.
-    // El contador ya quedó reservado y avanzado en Firestore — no se reutiliza,
-    // pero esto es lo correcto: garantiza unicidad estricta del N° de vale.
+    // Si falla la escritura del vale en Firebase, INTENTAMOS liberar el N° de
+    // vale reservado para evitar huecos en la numeración (ej. V-000014,
+    // V-000016...). La liberación es best-effort: si otro almacenero ya
+    // reservó después de nosotros, el hueco es inevitable bajo concurrencia
+    // real, pero esto cubre el caso común (sesión única que falla por red).
     try{
       await setVales(nuevos);
     }catch(e){
-      // Toast con duración extendida (8s) y mensaje claro para que el usuario
-      // pueda ver el error sin que desaparezca antes de leerlo.
-      console.error("Error al guardar vale:",e);
-      setToast({msg:"❌ Error al guardar el vale: "+(e?.message||"red sin conexión")+". El N° de vale fue consumido. Reintente.",type:"err"});
+      // Rollback del contador
+      const liberado = await liberarVale(numeroReservado);
+      if (liberado) {
+        // Devolvemos el contador local también para que el próximo intento use
+        // el mismo número
+        setValeNum(numeroReservado);
+        setToast({
+          msg: "❌ Error al guardar el vale: " + (e?.message||"red sin conexión") +
+               ". El N° " + ("V-"+String(numeroReservado).padStart(6,"0")) +
+               " quedó liberado, reintente.",
+          type: "err"
+        });
+      } else {
+        // No se pudo liberar (otro almacenero ya reservó el siguiente).
+        // El número queda "consumido" pero al menos avisamos.
+        setToast({
+          msg: "❌ Error al guardar el vale " + ("V-"+String(numeroReservado).padStart(6,"0")) +
+               ": " + (e?.message||"red sin conexión") +
+               ". El número quedó consumido (otro almacenero ya reservó después).",
+          type: "err"
+        });
+      }
       return;
     }
     setForm({fundo:"",equipoId:"",km:"",actividad:"",cultivo:"",almacenero:user.nombre||user.usuario,chofer:"",obs:"",producto:"",galones:""});
@@ -940,7 +840,7 @@ function AppAlmacenero({user,onLogout,maestros,vales,setVales}){
             </div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
               <div>
-                <label style={S.lbl}>Cultivo <span style={{color:"red"}}>*</span></label>
+                <label style={S.lbl}>Cultivo</label>
                 <select style={sel} value={form.cultivo} onChange={e=>setForm(f=>({...f,cultivo:e.target.value}))}>
                   <option value="">— Seleccionar —</option>
                   {(maestros.cultivos||[]).map(c=><option key={c} value={c}>{c}</option>)}
@@ -1729,13 +1629,13 @@ function DrawerDetalle({drawer,setDrawer,drawerTab,setDrawerTab,vales,maestros})
                       <div style={{marginTop:8}}>
                         <div style={{fontSize:9,color:C.txt3,marginBottom:3,display:"flex",justifyContent:"space-between"}}>
                           <span>📸 Foto del medidor</span>
-                          <button onClick={e=>{e.stopPropagation();verImagenAmpliada(v.fotoMedidor);}}
+                          <button onClick={e=>{e.stopPropagation();window.open(v.fotoMedidor,"_blank");}}
                             style={{fontSize:9,color:C.blue,background:"none",border:`1px solid ${C.blue}`,borderRadius:4,padding:"1px 6px",cursor:"pointer",fontFamily:"inherit"}}>
                             🔍 Ampliar
                           </button>
                         </div>
                         <img src={v.fotoMedidor} alt="medidor"
-                          onClick={e=>{e.stopPropagation();verImagenAmpliada(v.fotoMedidor);}}
+                          onClick={e=>{e.stopPropagation();window.open(v.fotoMedidor,"_blank");}}
                           style={{width:"100%",maxHeight:80,objectFit:"cover",borderRadius:6,
                             border:`1px solid ${C.bdr}`,cursor:"zoom-in"}}/>
                       </div>
@@ -2481,7 +2381,7 @@ function DashboardPlanner({user,onLogout,maestros,setMaestros,vales,users,setUse
                                         src={v.fotoMedidor}
                                         alt="medidor"
                                         title="Clic para ampliar"
-                                        onClick={e=>{e.stopPropagation();verImagenAmpliada(v.fotoMedidor);}}
+                                        onClick={e=>{e.stopPropagation();window.open(v.fotoMedidor,"_blank");}}
                                         style={{height:40,width:56,objectFit:"cover",borderRadius:5,
                                           border:`1px solid ${C.bdr}`,cursor:"zoom-in",display:"block"}}/>
                                     :<span style={{fontSize:10,color:C.txt3}}>—</span>}
@@ -2753,7 +2653,7 @@ function AppAprobador({user,onLogout,vales,setVales,users,precioPorGalon=18.5}){
           <div style={{marginBottom:10}}>
             <div style={{fontSize:9,color:C.txt3,marginBottom:3,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
               <span>📸 Foto del medidor de combustible</span>
-              <button onClick={()=>verImagenAmpliada(v.fotoMedidor)}
+              <button onClick={()=>window.open(v.fotoMedidor,"_blank")}
                 style={{fontSize:9,color:C.blue,background:"none",border:`1px solid ${C.blue}`,
                   borderRadius:5,padding:"1px 7px",cursor:"pointer",fontFamily:"inherit"}}>
                 🔍 Ampliar
@@ -2761,7 +2661,7 @@ function AppAprobador({user,onLogout,vales,setVales,users,precioPorGalon=18.5}){
             </div>
             <img src={v.fotoMedidor} alt="medidor"
               title="Clic para ampliar"
-              onClick={()=>verImagenAmpliada(v.fotoMedidor)}
+              onClick={()=>window.open(v.fotoMedidor,"_blank")}
               style={{width:"100%",maxHeight:110,border:`1px solid ${C.bdr}`,borderRadius:8,
                 objectFit:"cover",cursor:"zoom-in"}}/>
           </div>
@@ -3292,10 +3192,9 @@ export default function App(){
     for(const v of nuevos){
       const ant=anteriores.find(a=>a.id===v.id);
       if(!ant||JSON.stringify(ant)!==JSON.stringify(v)){
-        // Sanear undefined antes de enviar: Firestore rechaza el doc completo
-        // si encuentra un solo campo undefined. Propagamos errores para que
-        // handleSubmit pueda mostrar el toast y advertir al usuario.
-        await guardar("vales",String(v.id),limpiarUndefined(v));
+        // Propagar el primer error para que el caller (ej. handleSubmit) pueda
+        // manejar el fallo y abortar la actualización del contador.
+        await guardar("vales",String(v.id),v);
       }
     }
   },[]);
