@@ -172,13 +172,21 @@ function KCard({label,value,sub,color,accent}){
   );
 }
 function Toast({msg,type,onClose}){
-  useEffect(()=>{if(!msg)return;const t=setTimeout(onClose,3200);return()=>clearTimeout(t);},[msg]);
+  // Errores requieren más tiempo para que el usuario los lea (8s vs 3.2s)
+  useEffect(()=>{
+    if(!msg) return;
+    const ms = type==="err" ? 8000 : 3200;
+    const t = setTimeout(onClose, ms);
+    return ()=>clearTimeout(t);
+  },[msg,type]);
   if(!msg)return null;
   const bg=type==="ok"?C.ok:type==="err"?C.crit:type==="warn"?C.warn:C.navy;
   return(
     <div style={{position:"fixed",bottom:24,left:"50%",transform:"translateX(-50%)",
       background:bg,color:"#fff",padding:"11px 20px",borderRadius:12,fontSize:13,
-      fontWeight:500,zIndex:9999,boxShadow:"0 4px 20px rgba(0,0,0,.25)",whiteSpace:"nowrap"}}>
+      fontWeight:500,zIndex:9999,boxShadow:"0 4px 20px rgba(0,0,0,.25)",
+      maxWidth:"90vw",textAlign:"center",lineHeight:1.4,cursor:"pointer"}}
+      onClick={onClose} title="Clic para cerrar">
       {msg}
     </div>
   );
@@ -399,10 +407,99 @@ function FirmaCanvas({label, value, onChange}){
     </div>
   );
 }
+// ─── HELPERS GLOBALES ────────────────────────────────────────────────────────
+// Comprime una imagen data URL reduciendo dimensiones y calidad JPEG, para que
+// el documento Firestore no supere el límite de 1 MB. Mantiene la relación de
+// aspecto. Recibe un dataURL y devuelve un dataURL JPEG comprimido.
+function comprimirImagen(dataUrl, maxLado=900, calidad=0.7){
+  return new Promise((resolve,reject)=>{
+    if(!dataUrl){ resolve(null); return; }
+    const img = new Image();
+    img.onload = () => {
+      try{
+        let {width:w, height:h} = img;
+        if(w > maxLado || h > maxLado){
+          const r = w > h ? maxLado/w : maxLado/h;
+          w = Math.round(w*r); h = Math.round(h*r);
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL("image/jpeg", calidad));
+      }catch(e){ reject(e); }
+    };
+    img.onerror = reject;
+    img.src = dataUrl;
+  });
+}
+
+// Elimina recursivamente claves con valor undefined de un objeto/array.
+// Firestore rechaza el documento completo si encuentra undefined en cualquier
+// campo. Esta función es un cinturón de seguridad por si alguna actualización
+// futura olvida sanear algún valor.
+function limpiarUndefined(v){
+  if(Array.isArray(v)) return v.map(limpiarUndefined);
+  if(v && typeof v==="object"){
+    const o={};
+    for(const [k,val] of Object.entries(v)){
+      if(val===undefined) continue;
+      o[k] = limpiarUndefined(val);
+    }
+    return o;
+  }
+  return v;
+}
+
+// Abre una imagen (incluso data URLs) en un lightbox modal a pantalla completa.
+// Usamos esto en lugar de window.open() porque los navegadores modernos
+// (Chrome, Safari, Firefox) bloquean window.open con data URLs por seguridad
+// anti-phishing desde 2017. El lightbox usa DOM puro para poder llamarse
+// desde cualquier handler sin necesitar useState en cada componente.
+function verImagenAmpliada(src){
+  if(!src) return;
+  // Evitar duplicados si ya hay un lightbox abierto
+  const existente = document.getElementById("__lightbox_foto__");
+  if(existente) existente.remove();
+  const overlay = document.createElement("div");
+  overlay.id = "__lightbox_foto__";
+  Object.assign(overlay.style, {
+    position:"fixed", inset:"0", background:"rgba(0,0,0,0.92)",
+    display:"flex", alignItems:"center", justifyContent:"center",
+    zIndex:"99999", cursor:"zoom-out", padding:"20px",
+    animation:"fadeIn .15s ease",
+  });
+  const img = document.createElement("img");
+  img.src = src;
+  img.alt = "Foto ampliada";
+  Object.assign(img.style, {
+    maxWidth:"100%", maxHeight:"100%", objectFit:"contain",
+    boxShadow:"0 10px 40px rgba(0,0,0,.6)", borderRadius:"8px",
+  });
+  const close = document.createElement("button");
+  close.innerHTML = "✕";
+  Object.assign(close.style, {
+    position:"absolute", top:"16px", right:"16px",
+    background:"rgba(255,255,255,.15)", color:"#fff",
+    border:"1px solid rgba(255,255,255,.3)", borderRadius:"50%",
+    width:"40px", height:"40px", fontSize:"18px", cursor:"pointer",
+    fontFamily:"inherit",
+  });
+  const cerrar = () => overlay.remove();
+  overlay.addEventListener("click", cerrar);
+  close.addEventListener("click", e => { e.stopPropagation(); cerrar(); });
+  img.addEventListener("click", e => e.stopPropagation()); // no cerrar al clickear la imagen
+  // Cerrar con tecla Escape
+  const onKey = (e) => { if(e.key==="Escape"){ cerrar(); document.removeEventListener("keydown",onKey); } };
+  document.addEventListener("keydown", onKey);
+  overlay.appendChild(img);
+  overlay.appendChild(close);
+  document.body.appendChild(overlay);
+}
+
 function AppAlmacenero({user,onLogout,maestros,vales,setVales}){
   const [tab,setTab]=useState("nuevo");
   const [toast,setToast]=useState({msg:""});
-  const [guardando,setGuardando]=useState(false);
   const [candadoOk,setCandadoOk]=useState(null);       // null=sin verificar, true=OK, false=problema
   const [showCandadoModal,setShowCandadoModal]=useState(false);
   const [incidenteFoto,setIncidenteFoto]=useState(null);
@@ -456,20 +553,18 @@ function AppAlmacenero({user,onLogout,maestros,vales,setVales}){
     try{ await guardarCounter(n); }catch(e){ console.warn(e); }
   };
     const handleSubmit=async()=>{
-    if(guardando) return;
-    // Validaciones ANTES del try para poder usar return limpio
+    // Validación de candado: bloqueo lógico real, no solo visual
     if(candadoOk===null){
       setToast({msg:"Debe verificar el estado del candado antes de despachar",type:"err"});return;
     }
     if(!form.fundo||!form.equipoId||!form.actividad||!form.chofer){
       setToast({msg:"Complete todos los campos obligatorios (*)",type:"err"});return;
     }
-    if(!form.cultivo){setToast({msg:"Seleccione el cultivo — obligatorio para la aprobación",type:"err"});return;}
+    if(!form.cultivo){
+      setToast({msg:"Seleccione el cultivo (obligatorio)",type:"err"});return;
+    }
     if(!form.producto){setToast({msg:"Seleccione un tipo de combustible",type:"err"});return;}
     if(gl<=0){setToast({msg:"Ingrese los galones despachados",type:"err"});return;}
-    if(!fotoMedidor){setToast({msg:"La fotografía del medidor es obligatoria",type:"err"});return;}
-    setGuardando(true);
-    try{ // try externo para garantizar que guardando se resetea
 
     // Reservar el siguiente N° de vale ATÓMICAMENTE desde Firestore.
     // Esto evita que dos almaceneros generen el mismo número en paralelo.
@@ -484,6 +579,21 @@ function AppAlmacenero({user,onLogout,maestros,vales,setVales}){
     }
     setValeNum(numeroReservado + 1);
 
+    // Comprimir foto del medidor antes de guardar.
+    // Firestore tiene un límite duro de 1 MB por documento. Una foto sin
+    // comprimir en data URL fácilmente supera ese tamaño y el vale se rechaza
+    // con "Document too large", haciendo que NO aparezca en el dashboard.
+    let fotoComprimida = fotoMedidor;
+    if(fotoMedidor){
+      try{ fotoComprimida = await comprimirImagen(fotoMedidor, 900, 0.7); }
+      catch(e){ console.warn("No se pudo comprimir la foto:",e); }
+    }
+    let incidenteFotoComp = incidenteFoto;
+    if(incidenteFoto){
+      try{ incidenteFotoComp = await comprimirImagen(incidenteFoto, 900, 0.7); }
+      catch(e){ console.warn("No se pudo comprimir la foto del incidente:",e); }
+    }
+
     const now=new Date();
     const vale={
       id:numeroReservado,
@@ -493,14 +603,18 @@ function AppAlmacenero({user,onLogout,maestros,vales,setVales}){
       fundo:form.fundo,
       equipoId:form.equipoId,
       equipoDen:equipo?.den||"",
-      tipo:equipo?.tipo||tipoFiltro,
+      tipo:equipo?.tipo||tipoFiltro||"",
       placa:equipo?.placa||"",
       km:parseFloat(form.km)||0,
       actividad:form.actividad,
       cultivo:form.cultivo,
       producto:form.producto,
       gl,
-      teoRatio, teoUnit, actividadObj: actObj,
+      // Saneo: nunca dejar undefined en estos campos — Firestore rechaza el
+      // documento entero si encuentra undefined en cualquier propiedad.
+      teoRatio: teoRatio||null,
+      teoUnit:  teoUnit||"Gl/Hr",
+      actividadObj: actObj||null,
       kmAnterior: ultimoKm||null,
       diferencia: (()=>{
         const kma=parseFloat(form.km)||0;
@@ -508,16 +622,16 @@ function AppAlmacenero({user,onLogout,maestros,vales,setVales}){
         if(!ultimoKm || kma<=ultimoKm) return null;
         return kma-ultimoKm;
       })(),
-      obs:form.obs,
-      almacenero:form.almacenero,
+      obs:form.obs||"",
+      almacenero:form.almacenero||"",
       chofer:form.chofer,
-      registradoPor:user.nombre||user.usuario,
-      alertaEnviada:showAlerta,
-      fotoMedidor:fotoMedidor||null,
+      registradoPor:user.nombre||user.usuario||"",
+      alertaEnviada:!!showAlerta,
+      fotoMedidor:fotoComprimida||null,
       // Trazabilidad del candado de seguridad
       candadoOk:candadoOk,
-      incidenteNota:candadoOk===false?incidenteNota:"",
-      incidenteFoto:candadoOk===false?incidenteFoto:null,
+      incidenteNota:candadoOk===false?(incidenteNota||""):"",
+      incidenteFoto:candadoOk===false?(incidenteFotoComp||null):null,
     };
     const nuevos=[...vales,vale];
     // Si falla la escritura del vale en Firebase mostramos el error.
@@ -526,7 +640,10 @@ function AppAlmacenero({user,onLogout,maestros,vales,setVales}){
     try{
       await setVales(nuevos);
     }catch(e){
-      setToast({msg:"Error al guardar el vale: "+(e?.message||"red sin conexión"),type:"err"});
+      // Toast con duración extendida (8s) y mensaje claro para que el usuario
+      // pueda ver el error sin que desaparezca antes de leerlo.
+      console.error("Error al guardar vale:",e);
+      setToast({msg:"❌ Error al guardar el vale: "+(e?.message||"red sin conexión")+". El N° de vale fue consumido. Reintente.",type:"err"});
       return;
     }
     setForm({fundo:"",equipoId:"",km:"",actividad:"",cultivo:"",almacenero:user.nombre||user.usuario,chofer:"",obs:"",producto:"",galones:""});
@@ -538,8 +655,6 @@ function AppAlmacenero({user,onLogout,maestros,vales,setVales}){
     setIncidenteEnviado(false);
     setShowAlerta(false);
     setToast({msg:showAlerta?"✓ Vale registrado · ⚠ Alerta de exceso":"✓ Vale registrado",type:showAlerta?"warn":"ok"});
-    }catch(e){ setToast({msg:"Error al registrar: "+(e?.message||"intente de nuevo"),type:"err"}); }
-    finally{ setGuardando(false); }
   };
   const sel={...S.inp,cursor:"pointer"};
   return(
@@ -825,7 +940,7 @@ function AppAlmacenero({user,onLogout,maestros,vales,setVales}){
             </div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
               <div>
-                <label style={S.lbl}>Cultivo</label>
+                <label style={S.lbl}>Cultivo <span style={{color:"red"}}>*</span></label>
                 <select style={sel} value={form.cultivo} onChange={e=>setForm(f=>({...f,cultivo:e.target.value}))}>
                   <option value="">— Seleccionar —</option>
                   {(maestros.cultivos||[]).map(c=><option key={c} value={c}>{c}</option>)}
@@ -1614,13 +1729,13 @@ function DrawerDetalle({drawer,setDrawer,drawerTab,setDrawerTab,vales,maestros})
                       <div style={{marginTop:8}}>
                         <div style={{fontSize:9,color:C.txt3,marginBottom:3,display:"flex",justifyContent:"space-between"}}>
                           <span>📸 Foto del medidor</span>
-                          <button onClick={e=>{e.stopPropagation();window.open(v.fotoMedidor,"_blank");}}
+                          <button onClick={e=>{e.stopPropagation();verImagenAmpliada(v.fotoMedidor);}}
                             style={{fontSize:9,color:C.blue,background:"none",border:`1px solid ${C.blue}`,borderRadius:4,padding:"1px 6px",cursor:"pointer",fontFamily:"inherit"}}>
                             🔍 Ampliar
                           </button>
                         </div>
                         <img src={v.fotoMedidor} alt="medidor"
-                          onClick={e=>{e.stopPropagation();window.open(v.fotoMedidor,"_blank");}}
+                          onClick={e=>{e.stopPropagation();verImagenAmpliada(v.fotoMedidor);}}
                           style={{width:"100%",maxHeight:80,objectFit:"cover",borderRadius:6,
                             border:`1px solid ${C.bdr}`,cursor:"zoom-in"}}/>
                       </div>
@@ -1648,7 +1763,7 @@ function DashboardPlanner({user,onLogout,maestros,setMaestros,vales,users,setUse
   // Cargar incidentes desde Firebase
   useEffect(()=>{
     const unsub = escuchar("incidentes",(datos)=>{
-      setIncidentes(datos.sort((a,b)=>(b.timestamp||"").localeCompare(a.timestamp||"")));
+      setIncidentes(datos.sort((a,b)=>b.timestamp?.localeCompare(a.timestamp||"")));
     });
     return ()=>unsub();
   },[]);
@@ -1659,15 +1774,9 @@ function DashboardPlanner({user,onLogout,maestros,setMaestros,vales,users,setUse
   const [tSort,setTSort]=useState({col:"fecha",dir:-1});
   const [tHover,setTHover]=useState(null);
 
-  const kpis={
-    // KPIs calculados a partir de los vales reales registrados en la app.
-    // HIST_KPIS se mantenía como placeholder pero nunca acumulaba nada,
-    // por eso el resumen mostraba 0 gl y 0 equipos.
-    total_gl:  HIST_KPIS.total_gl  + vales.reduce((s,v)=>s+(parseFloat(v.gl)||0),0),
-    total_reg: HIST_KPIS.total_reg + vales.length,
-    total_exc: HIST_KPIS.total_exc + vales.filter(v=>v.alertaEnviada).length,
-    total_def: HIST_KPIS.total_def,
-    equipos:   new Set(vales.map(v=>v.equipoId).filter(Boolean)).size,
+  const kpis={...HIST_KPIS,
+    total_reg:HIST_KPIS.total_reg+vales.length,
+    total_exc:HIST_KPIS.total_exc+vales.filter(v=>v.alertaEnviada).length,
   };
   // MantList usa estado local — addMant ya no se necesita aquí
   // delMant ya no se necesita aquí
@@ -1722,11 +1831,8 @@ function DashboardPlanner({user,onLogout,maestros,setMaestros,vales,users,setUse
         nVale_SAP:"IK17", observaciones:"—",
       })),
       ...vales.map(v=>{
-        // Misma lógica que buildUnified: si no hay registro previo válido,
-        // no calcular galones esperados (el primer vale es la línea base).
-        const tienePrevio = v.kmAnterior && v.kmAnterior > 0;
-        const dif = (tienePrevio && v.diferencia && v.diferencia>0) ? v.diferencia : 0;
-        const glEsp = (v.teoRatio && dif > 0)
+        const dif = v.diferencia||v.km||0;
+        const glEsp = v.teoRatio
           ? (v.teoUnit==="Km/Gl" ? dif/v.teoRatio : dif*v.teoRatio)
           : null;
         const desv = glEsp ? ((v.gl-glEsp)/glEsp*100) : null;
@@ -1939,9 +2045,6 @@ function DashboardPlanner({user,onLogout,maestros,setMaestros,vales,users,setUse
               }
               return true;
             });
-            // KPIs reactivos a los filtros (no usar kpis.total_gl global)
-            const glFiltrados = rRows.reduce((s,r)=>s+(parseFloat(r.gl_real)||0),0);
-            const equiposUnicos = new Set(rRows.map(r=>r.id).filter(Boolean)).size;
             const excRows=rRows.filter(r=>r.af==="exceso");
             const defRows=rRows.filter(r=>r.af==="deficit");
             const normRows=rRows.filter(r=>r.diff!=null&&!r.af);
@@ -2012,7 +2115,7 @@ function DashboardPlanner({user,onLogout,maestros,setMaestros,vales,users,setUse
                   <select value={rFiltro.fundo} onChange={e=>setRFiltro(f=>({...f,fundo:e.target.value}))}
                     style={{fontSize:11,padding:"5px 10px",borderRadius:8,border:`1px solid ${C.bdr}`,fontFamily:"inherit",background:rFiltro.fundo?"#EFF6FF":C.surf2,WebkitAppearance:"none"}}>
                     <option value="">— Fundo —</option>
-                    {(maestros.fundos||[]).map(f=><option key={f} value={f}>{f}</option>)}
+                    {maestros.fundos.map(f=><option key={f} value={f}>{f}</option>)}
                   </select>
                   {(rFiltro.tipo||rFiltro.fundo||rFiltro.cultivo)&&(
                     <button onClick={()=>setRFiltro({tipo:"",fundo:"",cultivo:""})}
@@ -2047,8 +2150,8 @@ function DashboardPlanner({user,onLogout,maestros,setMaestros,vales,users,setUse
                       </div>
                     )}
                   </div>
-                  <KCard label="Galones totales" value={glFiltrados.toLocaleString("es-PE",{maximumFractionDigits:1})+" gl"} sub={rFiltro.cultivo||rFiltro.fundo||rFiltro.tipo?"según filtros":"período completo"} color={C.blue} accent={C.blue}/>
-                  <KCard label="Total registros" value={rRows.length} sub={equiposUnicos+" equipos"}/>
+                  <KCard label="Galones totales" value={kpis.total_gl.toLocaleString("es-PE")+" gl"} sub="período completo" color={C.blue} accent={C.blue}/>
+                  <KCard label="Total registros" value={rRows.length} sub={kpis.equipos+" equipos"}/>
                   <KCard label="Excesos" value={excRows.length} sub={`+${excRows.reduce((s,r)=>s+(r.diff||0),0).toFixed(1)} gl acum.`} color={C.exc} accent={C.exc}/>
                   <KCard label="Déficits" value={defRows.length} sub={`${defRows.reduce((s,r)=>s+(r.diff||0),0).toFixed(1)} gl acum.`} color={C.def_} accent={C.def_}/>
                 </div>
@@ -2163,7 +2266,7 @@ function DashboardPlanner({user,onLogout,maestros,setMaestros,vales,users,setUse
                 <select value={pfiltro.fundo} onChange={e=>setPfiltro(f=>({...f,fundo:e.target.value}))}
                   style={{fontSize:11,padding:"5px 8px",borderRadius:8,border:`1px solid ${C.bdr}`,fontFamily:"inherit",background:C.surf2,WebkitAppearance:"none"}}>
                   <option value="">— Fundo —</option>
-                  {(maestros.fundos||[]).map(f=><option key={f} value={f}>{f}</option>)}
+                  {maestros.fundos.map(f=><option key={f} value={f}>{f}</option>)}
                 </select>
                 <input placeholder="🔍 Buscar equipo..." value={pfiltro.search}
                   onChange={e=>setPfiltro(f=>({...f,search:e.target.value}))}
@@ -2308,7 +2411,7 @@ function DashboardPlanner({user,onLogout,maestros,setMaestros,vales,users,setUse
                     onChange={e=>setTFiltro(f=>({...f,search:e.target.value}))}
                     style={{padding:"6px 11px",borderRadius:8,border:`1px solid ${C.bdr}`,fontSize:11,fontFamily:"inherit",outline:"none",minWidth:200}}/>
                   {[["tipo","— Tipo —",[["TRACTOR","TRACTOR"],["CAMION","CAMIÓN"],["CISTERNA","CISTERNA"],["MONTACARGAS","MONTACARGAS"]]],
-                    ["fundo","— Fundo —",(maestros.fundos||[]).map(f=>[f,f])],
+                    ["fundo","— Fundo —",maestros.fundos.map(f=>[f,f])],
                     ["cultivo","— Cultivo —",(maestros.cultivos||[]).map(c=>[c,c])],
                     ["estado","— Estado —",[["aprobado","✅ Aprobado"],["rechazado","✕ Rechazado"],["pendiente","⏳ Pendiente"]]],
                   ].map(([k,ph,opts])=>(
@@ -2378,7 +2481,7 @@ function DashboardPlanner({user,onLogout,maestros,setMaestros,vales,users,setUse
                                         src={v.fotoMedidor}
                                         alt="medidor"
                                         title="Clic para ampliar"
-                                        onClick={e=>{e.stopPropagation();window.open(v.fotoMedidor,"_blank");}}
+                                        onClick={e=>{e.stopPropagation();verImagenAmpliada(v.fotoMedidor);}}
                                         style={{height:40,width:56,objectFit:"cover",borderRadius:5,
                                           border:`1px solid ${C.bdr}`,cursor:"zoom-in",display:"block"}}/>
                                     :<span style={{fontSize:10,color:C.txt3}}>—</span>}
@@ -2650,7 +2753,7 @@ function AppAprobador({user,onLogout,vales,setVales,users,precioPorGalon=18.5}){
           <div style={{marginBottom:10}}>
             <div style={{fontSize:9,color:C.txt3,marginBottom:3,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
               <span>📸 Foto del medidor de combustible</span>
-              <button onClick={()=>window.open(v.fotoMedidor,"_blank")}
+              <button onClick={()=>verImagenAmpliada(v.fotoMedidor)}
                 style={{fontSize:9,color:C.blue,background:"none",border:`1px solid ${C.blue}`,
                   borderRadius:5,padding:"1px 7px",cursor:"pointer",fontFamily:"inherit"}}>
                 🔍 Ampliar
@@ -2658,7 +2761,7 @@ function AppAprobador({user,onLogout,vales,setVales,users,precioPorGalon=18.5}){
             </div>
             <img src={v.fotoMedidor} alt="medidor"
               title="Clic para ampliar"
-              onClick={()=>window.open(v.fotoMedidor,"_blank")}
+              onClick={()=>verImagenAmpliada(v.fotoMedidor)}
               style={{width:"100%",maxHeight:110,border:`1px solid ${C.bdr}`,borderRadius:8,
                 objectFit:"cover",cursor:"zoom-in"}}/>
           </div>
@@ -2998,84 +3101,78 @@ function AppGerente({user,onLogout,vales,setVales,users,setUsers,maestros:maestr
             
             <div style={{background:C.surf,border:`1px solid ${C.bdr}`,borderRadius:12,padding:16}}>
               <div style={{fontSize:13,fontWeight:700,marginBottom:14}}>👥 Usuarios del sistema</div>
-              {[["ger","🏢 Gerente"],["plan","📊 Planner"],["apro","✅ Aprobador"],["alm","🧑‍🔧 Almacenero"]].map(([rol,label])=>{
-                const grupo=(users||[]).filter(u=>u.rol===rol);
-                if(!grupo.length) return null;
-                return(<div key={rol} style={{marginBottom:12}}>
-                  <div style={{fontSize:10,fontWeight:700,color:C.txt3,textTransform:"uppercase",
-                    letterSpacing:.6,marginBottom:6,padding:"4px 0",
-                    borderBottom:`2px solid ${C.bdr}`}}>
-                    {label} ({grupo.length})
-                  </div>
-                  {grupo.map((u,i)=>(
-                    <div key={u.id} style={{border:`1px solid ${u.activo?C.bdr:"#FCA5A5"}`,borderRadius:10,
-                      padding:"10px 12px",marginBottom:6,background:u.activo?"#fff":"#FFF5F5",
-                      opacity:u.activo?1:.75}}>
-                      {editUser?.id===u.id?(
+              {(users||[]).map((u,i)=>(
+                <div key={u.id} style={{border:`1px solid ${u.activo?C.bdr:"#FCA5A5"}`,borderRadius:10,
+                  padding:"10px 12px",marginBottom:8,background:u.activo?"#fff":"#FFF5F5",
+                  opacity:u.activo?1:.75}}>
+                  {editUser?.id===u.id?(
+                    /* Formulario edición inline */
+                    <div>
+                      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:6}}>
+                        {[["nombre","Nombre"],["usuario","Usuario"],["pass","Nueva contraseña"]].map(([k,l])=>(
+                          <div key={k}>
+                            <label style={{fontSize:9,color:C.txt3,display:"block",marginBottom:2,textTransform:"uppercase"}}>{l}</label>
+                            <input value={editUser[k]||""} onChange={e=>setEditUser(eu=>({...eu,[k]:e.target.value}))}
+                              placeholder={k==="pass"?"(sin cambio)":""}
+                              style={{width:"100%",padding:"5px 8px",border:`1.5px solid ${C.blue}`,borderRadius:6,fontSize:11,fontFamily:"inherit",outline:"none"}}/>
+                          </div>
+                        ))}
                         <div>
-                          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:6}}>
-                            {[["nombre","Nombre"],["usuario","Usuario"],["pass","Nueva contraseña"]].map(([k,l])=>(
-                              <div key={k}>
-                                <label style={{fontSize:9,color:C.txt3,display:"block",marginBottom:2,textTransform:"uppercase"}}>{l}</label>
-                                <input value={editUser[k]||""} onChange={e=>setEditUser(eu=>({...eu,[k]:e.target.value}))}
-                                  placeholder={k==="pass"?"(sin cambio)":""}
-                                  style={{width:"100%",padding:"5px 8px",border:`1.5px solid ${C.blue}`,borderRadius:6,fontSize:11,fontFamily:"inherit",outline:"none"}}/>
-                              </div>
-                            ))}
-                            <div>
-                              <label style={{fontSize:9,color:C.txt3,display:"block",marginBottom:2,textTransform:"uppercase"}}>Rol</label>
-                              <select value={editUser.rol} onChange={e=>setEditUser(eu=>({...eu,rol:e.target.value}))}
-                                style={{width:"100%",padding:"5px 8px",border:`1.5px solid ${C.blue}`,borderRadius:6,fontSize:11,fontFamily:"inherit",WebkitAppearance:"none"}}>
-                                {[["alm","Almacenero"],["plan","Planner"],["apro","Aprobador"],["ger","Gerente"]].map(([v,l])=><option key={v} value={v}>{l}</option>)}
-                              </select>
-                            </div>
-                          </div>
-                          {editUser.rol==="apro"&&(
-                            <div style={{marginBottom:6}}>
-                              <label style={{fontSize:9,color:C.txt3,display:"block",marginBottom:3,textTransform:"uppercase"}}>Cultivos</label>
-                              <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
-                                {(maestros.cultivos||["ESPARRAGO","ARANDANO","PIMIENTO","PALTA","PALTO","ALCACHOFA","OTROS"]).map(c=>{
-                                  const sel=(editUser.cultivos||[]).includes(c);
-                                  return(<button key={c} onClick={()=>setEditUser(eu=>({...eu,cultivos:sel?(eu.cultivos||[]).filter(x=>x!==c):[...(eu.cultivos||[]),c]}))}
-                                    style={{padding:"2px 7px",borderRadius:10,fontSize:10,fontWeight:600,
-                                      border:`1px solid ${sel?C.blue:C.bdr}`,background:sel?"#EFF6FF":"#fff",
-                                      color:sel?C.blue:C.txt3,cursor:"pointer",fontFamily:"inherit"}}>{c}</button>);
-                                })}
-                              </div>
-                            </div>
-                          )}
-                          <div style={{display:"flex",gap:6,marginTop:4}}>
-                            <button onClick={async()=>{
-                                const upd=(users||[]).map(x=>x.id===editUser.id?{...x,...editUser,...(editUser.pass?{pass:editUser.pass}:{})}:x);
-                                await setUsers(upd);setEditUser(null);setToast({msg:"✓ Actualizado",type:"ok"});
-                              }}
-                              style={{flex:1,padding:"6px",background:C.ok,color:"#fff",border:"none",borderRadius:7,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>✓ Guardar</button>
-                            <button onClick={()=>setEditUser(null)}
-                              style={{padding:"6px 12px",background:C.surf2,color:C.txt2,border:`1px solid ${C.bdr}`,borderRadius:7,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>Cancelar</button>
-                          </div>
+                          <label style={{fontSize:9,color:C.txt3,display:"block",marginBottom:2,textTransform:"uppercase"}}>Rol</label>
+                          <select value={editUser.rol} onChange={e=>setEditUser(eu=>({...eu,rol:e.target.value}))}
+                            style={{width:"100%",padding:"5px 8px",border:`1.5px solid ${C.blue}`,borderRadius:6,fontSize:11,fontFamily:"inherit",WebkitAppearance:"none"}}>
+                            {[["alm","Almacenero"],["plan","Planner"],["apro","Aprobador"],["ger","Gerente"]].map(([v,l])=><option key={v} value={v}>{l}</option>)}
+                          </select>
                         </div>
-                      ):(
-                        <div style={{display:"flex",alignItems:"center",gap:8}}>
-                          <div style={{flex:1}}>
-                            <div style={{fontWeight:600,fontSize:12}}>{u.nombre}</div>
-                            <div style={{fontSize:10,color:C.txt3,fontFamily:"monospace"}}>{u.usuario}{(u.cultivos||[]).length>0&&` · ${u.cultivos.join(", ")}`}</div>
-                          </div>
-                          <Badge type={u.activo?"ok":"warn"}>{u.activo?"Activo":"Inactivo"}</Badge>
-                          <div style={{display:"flex",gap:4}}>
-                            <button onClick={()=>setEditUser({...u,pass:""})}
-                              style={{fontSize:10,padding:"3px 8px",borderRadius:5,background:C.blue,color:"#fff",border:"none",cursor:"pointer",fontFamily:"inherit"}}>✎</button>
-                            <button onClick={async()=>{const upd=(users||[]).map(x=>x.id===u.id?{...x,activo:!x.activo}:x);await setUsers(upd);}}
-                              style={{fontSize:10,padding:"3px 8px",borderRadius:5,border:`1px solid ${C.bdr}`,background:u.activo?"#FEF2F2":"#F0FDF4",color:u.activo?C.crit:C.ok,cursor:"pointer",fontFamily:"inherit"}}>
-                              {u.activo?"Baja":"Alta"}
-                            </button>
+                      </div>
+                      {editUser.rol==="apro"&&(
+                        <div style={{marginBottom:6}}>
+                          <label style={{fontSize:9,color:C.txt3,display:"block",marginBottom:3,textTransform:"uppercase"}}>Cultivos</label>
+                          <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                            {["ESPARRAGO","ARANDANO","PIMIENTO","PALTA","PALTO","ALCACHOFA","OTROS"].map(c=>{
+                              const sel=(editUser.cultivos||[]).includes(c);
+                              return(<button key={c} onClick={()=>setEditUser(eu=>({...eu,cultivos:sel?(eu.cultivos||[]).filter(x=>x!==c):[...(eu.cultivos||[]),c]}))}
+                                style={{padding:"2px 7px",borderRadius:10,fontSize:10,fontWeight:600,border:`1px solid ${sel?C.blue:C.bdr}`,background:sel?"#EFF6FF":"#fff",color:sel?C.blue:C.txt3,cursor:"pointer",fontFamily:"inherit"}}>{c}</button>);
+                            })}
                           </div>
                         </div>
                       )}
+                      <div style={{display:"flex",gap:6,marginTop:4}}>
+                        <button onClick={async()=>{
+                            const upd=(users||[]).map(x=>x.id===editUser.id?{...x,...editUser,...(editUser.pass?{pass:editUser.pass}:{})}:x);
+                            await setUsers(upd);setEditUser(null);setToast({msg:"✓ Usuario actualizado",type:"ok"});
+                          }}
+                          style={{flex:1,padding:"6px",background:C.ok,color:"#fff",border:"none",borderRadius:7,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>✓ Guardar</button>
+                        <button onClick={()=>setEditUser(null)}
+                          style={{padding:"6px 12px",background:C.surf2,color:C.txt2,border:`1px solid ${C.bdr}`,borderRadius:7,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>Cancelar</button>
+                      </div>
                     </div>
-                  ))}
-                </div>);
-              })}
-                            <div style={{fontSize:13,fontWeight:700,marginBottom:14}}>+ Nuevo usuario</div>
+                  ):(
+                    <div style={{display:"flex",alignItems:"center",gap:8}}>
+                      <div style={{flex:1}}>
+                        <div style={{fontWeight:600,fontSize:12}}>{u.nombre}</div>
+                        <div style={{fontSize:10,color:C.txt3,fontFamily:"monospace"}}>{u.usuario}{(u.cultivos||[]).length>0&&` · ${u.cultivos.join(", ")}`}</div>
+                      </div>
+                      <Badge type={u.rol==="plan"?"exc":u.rol==="apro"?"warn":u.rol==="ger"?"def_":"ok"}>
+                        {u.rol==="plan"?"Planner":u.rol==="apro"?"Aprobador":u.rol==="ger"?"Gerente":"Almacenero"}
+                      </Badge>
+                      <Badge type={u.activo?"ok":"warn"}>{u.activo?"Activo":"Inactivo"}</Badge>
+                      <div style={{display:"flex",gap:4}}>
+                        <button onClick={()=>setEditUser({...u,pass:""})}
+                          style={{fontSize:10,padding:"3px 8px",borderRadius:5,background:C.blue,color:"#fff",border:"none",cursor:"pointer",fontFamily:"inherit"}}>✎</button>
+                        <button onClick={async()=>{const upd=(users||[]).map(x=>x.id===u.id?{...x,activo:!x.activo}:x);await setUsers(upd);}}
+                          style={{fontSize:10,padding:"3px 8px",borderRadius:5,border:`1px solid ${C.bdr}`,background:u.activo?"#FEF2F2":"#F0FDF4",color:u.activo?C.crit:C.ok,cursor:"pointer",fontFamily:"inherit"}}>
+                          {u.activo?"Baja":"Alta"}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+            
+            <div style={{background:C.surf,border:`1px solid ${C.bdr}`,borderRadius:12,padding:16}}>
+              <div style={{fontSize:13,fontWeight:700,marginBottom:14}}>+ Nuevo usuario</div>
               {[{k:"nombre",label:"Nombre completo",ph:"Ej. Juan García"},{k:"usuario",label:"Usuario (login)",ph:"Ej. jgarcia"},{k:"pass",label:"Contraseña",ph:"Mínimo 6 caracteres"}].map(f=>(
                 <div key={f.k} style={{marginBottom:10}}>
                   <label style={{fontSize:11,fontWeight:600,color:C.txt2,marginBottom:5,display:"block"}}>{f.label}</label>
@@ -3195,9 +3292,10 @@ export default function App(){
     for(const v of nuevos){
       const ant=anteriores.find(a=>a.id===v.id);
       if(!ant||JSON.stringify(ant)!==JSON.stringify(v)){
-        // Propagar el primer error para que el caller (ej. handleSubmit) pueda
-        // manejar el fallo y abortar la actualización del contador.
-        await guardar("vales",String(v.id),v);
+        // Sanear undefined antes de enviar: Firestore rechaza el doc completo
+        // si encuentra un solo campo undefined. Propagamos errores para que
+        // handleSubmit pueda mostrar el toast y advertir al usuario.
+        await guardar("vales",String(v.id),limpiarUndefined(v));
       }
     }
   },[]);
