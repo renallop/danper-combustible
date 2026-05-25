@@ -402,6 +402,7 @@ function FirmaCanvas({label, value, onChange}){
 function AppAlmacenero({user,onLogout,maestros,vales,setVales}){
   const [tab,setTab]=useState("nuevo");
   const [toast,setToast]=useState({msg:""});
+  const [guardando,setGuardando]=useState(false);
   const [candadoOk,setCandadoOk]=useState(null);       // null=sin verificar, true=OK, false=problema
   const [showCandadoModal,setShowCandadoModal]=useState(false);
   const [incidenteFoto,setIncidenteFoto]=useState(null);
@@ -455,15 +456,20 @@ function AppAlmacenero({user,onLogout,maestros,vales,setVales}){
     try{ await guardarCounter(n); }catch(e){ console.warn(e); }
   };
     const handleSubmit=async()=>{
-    // Validación de candado: bloqueo lógico real, no solo visual
+    if(guardando) return;
+    // Validaciones ANTES del try para poder usar return limpio
     if(candadoOk===null){
       setToast({msg:"Debe verificar el estado del candado antes de despachar",type:"err"});return;
     }
     if(!form.fundo||!form.equipoId||!form.actividad||!form.chofer){
       setToast({msg:"Complete todos los campos obligatorios (*)",type:"err"});return;
     }
+    if(!form.cultivo){setToast({msg:"Seleccione el cultivo — obligatorio para la aprobación",type:"err"});return;}
     if(!form.producto){setToast({msg:"Seleccione un tipo de combustible",type:"err"});return;}
     if(gl<=0){setToast({msg:"Ingrese los galones despachados",type:"err"});return;}
+    if(!fotoMedidor){setToast({msg:"La fotografía del medidor es obligatoria",type:"err"});return;}
+    setGuardando(true);
+    try{ // try externo para garantizar que guardando se resetea
 
     // Reservar el siguiente N° de vale ATÓMICAMENTE desde Firestore.
     // Esto evita que dos almaceneros generen el mismo número en paralelo.
@@ -532,6 +538,8 @@ function AppAlmacenero({user,onLogout,maestros,vales,setVales}){
     setIncidenteEnviado(false);
     setShowAlerta(false);
     setToast({msg:showAlerta?"✓ Vale registrado · ⚠ Alerta de exceso":"✓ Vale registrado",type:showAlerta?"warn":"ok"});
+    }catch(e){ setToast({msg:"Error al registrar: "+(e?.message||"intente de nuevo"),type:"err"}); }
+    finally{ setGuardando(false); }
   };
   const sel={...S.inp,cursor:"pointer"};
   return(
@@ -1640,7 +1648,7 @@ function DashboardPlanner({user,onLogout,maestros,setMaestros,vales,users,setUse
   // Cargar incidentes desde Firebase
   useEffect(()=>{
     const unsub = escuchar("incidentes",(datos)=>{
-      setIncidentes(datos.sort((a,b)=>b.timestamp?.localeCompare(a.timestamp||"")));
+      setIncidentes(datos.sort((a,b)=>(b.timestamp||"").localeCompare(a.timestamp||"")));
     });
     return ()=>unsub();
   },[]);
@@ -1651,9 +1659,15 @@ function DashboardPlanner({user,onLogout,maestros,setMaestros,vales,users,setUse
   const [tSort,setTSort]=useState({col:"fecha",dir:-1});
   const [tHover,setTHover]=useState(null);
 
-  const kpis={...HIST_KPIS,
-    total_reg:HIST_KPIS.total_reg+vales.length,
-    total_exc:HIST_KPIS.total_exc+vales.filter(v=>v.alertaEnviada).length,
+  const kpis={
+    // KPIs calculados a partir de los vales reales registrados en la app.
+    // HIST_KPIS se mantenía como placeholder pero nunca acumulaba nada,
+    // por eso el resumen mostraba 0 gl y 0 equipos.
+    total_gl:  HIST_KPIS.total_gl  + vales.reduce((s,v)=>s+(parseFloat(v.gl)||0),0),
+    total_reg: HIST_KPIS.total_reg + vales.length,
+    total_exc: HIST_KPIS.total_exc + vales.filter(v=>v.alertaEnviada).length,
+    total_def: HIST_KPIS.total_def,
+    equipos:   new Set(vales.map(v=>v.equipoId).filter(Boolean)).size,
   };
   // MantList usa estado local — addMant ya no se necesita aquí
   // delMant ya no se necesita aquí
@@ -1708,8 +1722,11 @@ function DashboardPlanner({user,onLogout,maestros,setMaestros,vales,users,setUse
         nVale_SAP:"IK17", observaciones:"—",
       })),
       ...vales.map(v=>{
-        const dif = v.diferencia||v.km||0;
-        const glEsp = v.teoRatio
+        // Misma lógica que buildUnified: si no hay registro previo válido,
+        // no calcular galones esperados (el primer vale es la línea base).
+        const tienePrevio = v.kmAnterior && v.kmAnterior > 0;
+        const dif = (tienePrevio && v.diferencia && v.diferencia>0) ? v.diferencia : 0;
+        const glEsp = (v.teoRatio && dif > 0)
           ? (v.teoUnit==="Km/Gl" ? dif/v.teoRatio : dif*v.teoRatio)
           : null;
         const desv = glEsp ? ((v.gl-glEsp)/glEsp*100) : null;
@@ -1922,6 +1939,9 @@ function DashboardPlanner({user,onLogout,maestros,setMaestros,vales,users,setUse
               }
               return true;
             });
+            // KPIs reactivos a los filtros (no usar kpis.total_gl global)
+            const glFiltrados = rRows.reduce((s,r)=>s+(parseFloat(r.gl_real)||0),0);
+            const equiposUnicos = new Set(rRows.map(r=>r.id).filter(Boolean)).size;
             const excRows=rRows.filter(r=>r.af==="exceso");
             const defRows=rRows.filter(r=>r.af==="deficit");
             const normRows=rRows.filter(r=>r.diff!=null&&!r.af);
@@ -1992,7 +2012,7 @@ function DashboardPlanner({user,onLogout,maestros,setMaestros,vales,users,setUse
                   <select value={rFiltro.fundo} onChange={e=>setRFiltro(f=>({...f,fundo:e.target.value}))}
                     style={{fontSize:11,padding:"5px 10px",borderRadius:8,border:`1px solid ${C.bdr}`,fontFamily:"inherit",background:rFiltro.fundo?"#EFF6FF":C.surf2,WebkitAppearance:"none"}}>
                     <option value="">— Fundo —</option>
-                    {maestros.fundos.map(f=><option key={f} value={f}>{f}</option>)}
+                    {(maestros.fundos||[]).map(f=><option key={f} value={f}>{f}</option>)}
                   </select>
                   {(rFiltro.tipo||rFiltro.fundo||rFiltro.cultivo)&&(
                     <button onClick={()=>setRFiltro({tipo:"",fundo:"",cultivo:""})}
@@ -2027,8 +2047,8 @@ function DashboardPlanner({user,onLogout,maestros,setMaestros,vales,users,setUse
                       </div>
                     )}
                   </div>
-                  <KCard label="Galones totales" value={kpis.total_gl.toLocaleString("es-PE")+" gl"} sub="período completo" color={C.blue} accent={C.blue}/>
-                  <KCard label="Total registros" value={rRows.length} sub={kpis.equipos+" equipos"}/>
+                  <KCard label="Galones totales" value={glFiltrados.toLocaleString("es-PE",{maximumFractionDigits:1})+" gl"} sub={rFiltro.cultivo||rFiltro.fundo||rFiltro.tipo?"según filtros":"período completo"} color={C.blue} accent={C.blue}/>
+                  <KCard label="Total registros" value={rRows.length} sub={equiposUnicos+" equipos"}/>
                   <KCard label="Excesos" value={excRows.length} sub={`+${excRows.reduce((s,r)=>s+(r.diff||0),0).toFixed(1)} gl acum.`} color={C.exc} accent={C.exc}/>
                   <KCard label="Déficits" value={defRows.length} sub={`${defRows.reduce((s,r)=>s+(r.diff||0),0).toFixed(1)} gl acum.`} color={C.def_} accent={C.def_}/>
                 </div>
@@ -2143,7 +2163,7 @@ function DashboardPlanner({user,onLogout,maestros,setMaestros,vales,users,setUse
                 <select value={pfiltro.fundo} onChange={e=>setPfiltro(f=>({...f,fundo:e.target.value}))}
                   style={{fontSize:11,padding:"5px 8px",borderRadius:8,border:`1px solid ${C.bdr}`,fontFamily:"inherit",background:C.surf2,WebkitAppearance:"none"}}>
                   <option value="">— Fundo —</option>
-                  {maestros.fundos.map(f=><option key={f} value={f}>{f}</option>)}
+                  {(maestros.fundos||[]).map(f=><option key={f} value={f}>{f}</option>)}
                 </select>
                 <input placeholder="🔍 Buscar equipo..." value={pfiltro.search}
                   onChange={e=>setPfiltro(f=>({...f,search:e.target.value}))}
@@ -2288,7 +2308,7 @@ function DashboardPlanner({user,onLogout,maestros,setMaestros,vales,users,setUse
                     onChange={e=>setTFiltro(f=>({...f,search:e.target.value}))}
                     style={{padding:"6px 11px",borderRadius:8,border:`1px solid ${C.bdr}`,fontSize:11,fontFamily:"inherit",outline:"none",minWidth:200}}/>
                   {[["tipo","— Tipo —",[["TRACTOR","TRACTOR"],["CAMION","CAMIÓN"],["CISTERNA","CISTERNA"],["MONTACARGAS","MONTACARGAS"]]],
-                    ["fundo","— Fundo —",maestros.fundos.map(f=>[f,f])],
+                    ["fundo","— Fundo —",(maestros.fundos||[]).map(f=>[f,f])],
                     ["cultivo","— Cultivo —",(maestros.cultivos||[]).map(c=>[c,c])],
                     ["estado","— Estado —",[["aprobado","✅ Aprobado"],["rechazado","✕ Rechazado"],["pendiente","⏳ Pendiente"]]],
                   ].map(([k,ph,opts])=>(
@@ -2978,78 +2998,84 @@ function AppGerente({user,onLogout,vales,setVales,users,setUsers,maestros:maestr
             
             <div style={{background:C.surf,border:`1px solid ${C.bdr}`,borderRadius:12,padding:16}}>
               <div style={{fontSize:13,fontWeight:700,marginBottom:14}}>👥 Usuarios del sistema</div>
-              {(users||[]).map((u,i)=>(
-                <div key={u.id} style={{border:`1px solid ${u.activo?C.bdr:"#FCA5A5"}`,borderRadius:10,
-                  padding:"10px 12px",marginBottom:8,background:u.activo?"#fff":"#FFF5F5",
-                  opacity:u.activo?1:.75}}>
-                  {editUser?.id===u.id?(
-                    /* Formulario edición inline */
-                    <div>
-                      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:6}}>
-                        {[["nombre","Nombre"],["usuario","Usuario"],["pass","Nueva contraseña"]].map(([k,l])=>(
-                          <div key={k}>
-                            <label style={{fontSize:9,color:C.txt3,display:"block",marginBottom:2,textTransform:"uppercase"}}>{l}</label>
-                            <input value={editUser[k]||""} onChange={e=>setEditUser(eu=>({...eu,[k]:e.target.value}))}
-                              placeholder={k==="pass"?"(sin cambio)":""}
-                              style={{width:"100%",padding:"5px 8px",border:`1.5px solid ${C.blue}`,borderRadius:6,fontSize:11,fontFamily:"inherit",outline:"none"}}/>
-                          </div>
-                        ))}
+              {[["ger","🏢 Gerente"],["plan","📊 Planner"],["apro","✅ Aprobador"],["alm","🧑‍🔧 Almacenero"]].map(([rol,label])=>{
+                const grupo=(users||[]).filter(u=>u.rol===rol);
+                if(!grupo.length) return null;
+                return(<div key={rol} style={{marginBottom:12}}>
+                  <div style={{fontSize:10,fontWeight:700,color:C.txt3,textTransform:"uppercase",
+                    letterSpacing:.6,marginBottom:6,padding:"4px 0",
+                    borderBottom:`2px solid ${C.bdr}`}}>
+                    {label} ({grupo.length})
+                  </div>
+                  {grupo.map((u,i)=>(
+                    <div key={u.id} style={{border:`1px solid ${u.activo?C.bdr:"#FCA5A5"}`,borderRadius:10,
+                      padding:"10px 12px",marginBottom:6,background:u.activo?"#fff":"#FFF5F5",
+                      opacity:u.activo?1:.75}}>
+                      {editUser?.id===u.id?(
                         <div>
-                          <label style={{fontSize:9,color:C.txt3,display:"block",marginBottom:2,textTransform:"uppercase"}}>Rol</label>
-                          <select value={editUser.rol} onChange={e=>setEditUser(eu=>({...eu,rol:e.target.value}))}
-                            style={{width:"100%",padding:"5px 8px",border:`1.5px solid ${C.blue}`,borderRadius:6,fontSize:11,fontFamily:"inherit",WebkitAppearance:"none"}}>
-                            {[["alm","Almacenero"],["plan","Planner"],["apro","Aprobador"],["ger","Gerente"]].map(([v,l])=><option key={v} value={v}>{l}</option>)}
-                          </select>
+                          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:6}}>
+                            {[["nombre","Nombre"],["usuario","Usuario"],["pass","Nueva contraseña"]].map(([k,l])=>(
+                              <div key={k}>
+                                <label style={{fontSize:9,color:C.txt3,display:"block",marginBottom:2,textTransform:"uppercase"}}>{l}</label>
+                                <input value={editUser[k]||""} onChange={e=>setEditUser(eu=>({...eu,[k]:e.target.value}))}
+                                  placeholder={k==="pass"?"(sin cambio)":""}
+                                  style={{width:"100%",padding:"5px 8px",border:`1.5px solid ${C.blue}`,borderRadius:6,fontSize:11,fontFamily:"inherit",outline:"none"}}/>
+                              </div>
+                            ))}
+                            <div>
+                              <label style={{fontSize:9,color:C.txt3,display:"block",marginBottom:2,textTransform:"uppercase"}}>Rol</label>
+                              <select value={editUser.rol} onChange={e=>setEditUser(eu=>({...eu,rol:e.target.value}))}
+                                style={{width:"100%",padding:"5px 8px",border:`1.5px solid ${C.blue}`,borderRadius:6,fontSize:11,fontFamily:"inherit",WebkitAppearance:"none"}}>
+                                {[["alm","Almacenero"],["plan","Planner"],["apro","Aprobador"],["ger","Gerente"]].map(([v,l])=><option key={v} value={v}>{l}</option>)}
+                              </select>
+                            </div>
+                          </div>
+                          {editUser.rol==="apro"&&(
+                            <div style={{marginBottom:6}}>
+                              <label style={{fontSize:9,color:C.txt3,display:"block",marginBottom:3,textTransform:"uppercase"}}>Cultivos</label>
+                              <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                                {(maestros.cultivos||["ESPARRAGO","ARANDANO","PIMIENTO","PALTA","PALTO","ALCACHOFA","OTROS"]).map(c=>{
+                                  const sel=(editUser.cultivos||[]).includes(c);
+                                  return(<button key={c} onClick={()=>setEditUser(eu=>({...eu,cultivos:sel?(eu.cultivos||[]).filter(x=>x!==c):[...(eu.cultivos||[]),c]}))}
+                                    style={{padding:"2px 7px",borderRadius:10,fontSize:10,fontWeight:600,
+                                      border:`1px solid ${sel?C.blue:C.bdr}`,background:sel?"#EFF6FF":"#fff",
+                                      color:sel?C.blue:C.txt3,cursor:"pointer",fontFamily:"inherit"}}>{c}</button>);
+                                })}
+                              </div>
+                            </div>
+                          )}
+                          <div style={{display:"flex",gap:6,marginTop:4}}>
+                            <button onClick={async()=>{
+                                const upd=(users||[]).map(x=>x.id===editUser.id?{...x,...editUser,...(editUser.pass?{pass:editUser.pass}:{})}:x);
+                                await setUsers(upd);setEditUser(null);setToast({msg:"✓ Actualizado",type:"ok"});
+                              }}
+                              style={{flex:1,padding:"6px",background:C.ok,color:"#fff",border:"none",borderRadius:7,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>✓ Guardar</button>
+                            <button onClick={()=>setEditUser(null)}
+                              style={{padding:"6px 12px",background:C.surf2,color:C.txt2,border:`1px solid ${C.bdr}`,borderRadius:7,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>Cancelar</button>
+                          </div>
                         </div>
-                      </div>
-                      {editUser.rol==="apro"&&(
-                        <div style={{marginBottom:6}}>
-                          <label style={{fontSize:9,color:C.txt3,display:"block",marginBottom:3,textTransform:"uppercase"}}>Cultivos</label>
-                          <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
-                            {["ESPARRAGO","ARANDANO","PIMIENTO","PALTA","PALTO","ALCACHOFA","OTROS"].map(c=>{
-                              const sel=(editUser.cultivos||[]).includes(c);
-                              return(<button key={c} onClick={()=>setEditUser(eu=>({...eu,cultivos:sel?(eu.cultivos||[]).filter(x=>x!==c):[...(eu.cultivos||[]),c]}))}
-                                style={{padding:"2px 7px",borderRadius:10,fontSize:10,fontWeight:600,border:`1px solid ${sel?C.blue:C.bdr}`,background:sel?"#EFF6FF":"#fff",color:sel?C.blue:C.txt3,cursor:"pointer",fontFamily:"inherit"}}>{c}</button>);
-                            })}
+                      ):(
+                        <div style={{display:"flex",alignItems:"center",gap:8}}>
+                          <div style={{flex:1}}>
+                            <div style={{fontWeight:600,fontSize:12}}>{u.nombre}</div>
+                            <div style={{fontSize:10,color:C.txt3,fontFamily:"monospace"}}>{u.usuario}{(u.cultivos||[]).length>0&&` · ${u.cultivos.join(", ")}`}</div>
+                          </div>
+                          <Badge type={u.activo?"ok":"warn"}>{u.activo?"Activo":"Inactivo"}</Badge>
+                          <div style={{display:"flex",gap:4}}>
+                            <button onClick={()=>setEditUser({...u,pass:""})}
+                              style={{fontSize:10,padding:"3px 8px",borderRadius:5,background:C.blue,color:"#fff",border:"none",cursor:"pointer",fontFamily:"inherit"}}>✎</button>
+                            <button onClick={async()=>{const upd=(users||[]).map(x=>x.id===u.id?{...x,activo:!x.activo}:x);await setUsers(upd);}}
+                              style={{fontSize:10,padding:"3px 8px",borderRadius:5,border:`1px solid ${C.bdr}`,background:u.activo?"#FEF2F2":"#F0FDF4",color:u.activo?C.crit:C.ok,cursor:"pointer",fontFamily:"inherit"}}>
+                              {u.activo?"Baja":"Alta"}
+                            </button>
                           </div>
                         </div>
                       )}
-                      <div style={{display:"flex",gap:6,marginTop:4}}>
-                        <button onClick={async()=>{
-                            const upd=(users||[]).map(x=>x.id===editUser.id?{...x,...editUser,...(editUser.pass?{pass:editUser.pass}:{})}:x);
-                            await setUsers(upd);setEditUser(null);setToast({msg:"✓ Usuario actualizado",type:"ok"});
-                          }}
-                          style={{flex:1,padding:"6px",background:C.ok,color:"#fff",border:"none",borderRadius:7,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>✓ Guardar</button>
-                        <button onClick={()=>setEditUser(null)}
-                          style={{padding:"6px 12px",background:C.surf2,color:C.txt2,border:`1px solid ${C.bdr}`,borderRadius:7,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>Cancelar</button>
-                      </div>
                     </div>
-                  ):(
-                    <div style={{display:"flex",alignItems:"center",gap:8}}>
-                      <div style={{flex:1}}>
-                        <div style={{fontWeight:600,fontSize:12}}>{u.nombre}</div>
-                        <div style={{fontSize:10,color:C.txt3,fontFamily:"monospace"}}>{u.usuario}{(u.cultivos||[]).length>0&&` · ${u.cultivos.join(", ")}`}</div>
-                      </div>
-                      <Badge type={u.rol==="plan"?"exc":u.rol==="apro"?"warn":u.rol==="ger"?"def_":"ok"}>
-                        {u.rol==="plan"?"Planner":u.rol==="apro"?"Aprobador":u.rol==="ger"?"Gerente":"Almacenero"}
-                      </Badge>
-                      <Badge type={u.activo?"ok":"warn"}>{u.activo?"Activo":"Inactivo"}</Badge>
-                      <div style={{display:"flex",gap:4}}>
-                        <button onClick={()=>setEditUser({...u,pass:""})}
-                          style={{fontSize:10,padding:"3px 8px",borderRadius:5,background:C.blue,color:"#fff",border:"none",cursor:"pointer",fontFamily:"inherit"}}>✎</button>
-                        <button onClick={async()=>{const upd=(users||[]).map(x=>x.id===u.id?{...x,activo:!x.activo}:x);await setUsers(upd);}}
-                          style={{fontSize:10,padding:"3px 8px",borderRadius:5,border:`1px solid ${C.bdr}`,background:u.activo?"#FEF2F2":"#F0FDF4",color:u.activo?C.crit:C.ok,cursor:"pointer",fontFamily:"inherit"}}>
-                          {u.activo?"Baja":"Alta"}
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-            
-            <div style={{background:C.surf,border:`1px solid ${C.bdr}`,borderRadius:12,padding:16}}>
-              <div style={{fontSize:13,fontWeight:700,marginBottom:14}}>+ Nuevo usuario</div>
+                  ))}
+                </div>);
+              })}
+                            <div style={{fontSize:13,fontWeight:700,marginBottom:14}}>+ Nuevo usuario</div>
               {[{k:"nombre",label:"Nombre completo",ph:"Ej. Juan García"},{k:"usuario",label:"Usuario (login)",ph:"Ej. jgarcia"},{k:"pass",label:"Contraseña",ph:"Mínimo 6 caracteres"}].map(f=>(
                 <div key={f.k} style={{marginBottom:10}}>
                   <label style={{fontSize:11,fontWeight:600,color:C.txt2,marginBottom:5,display:"block"}}>{f.label}</label>
