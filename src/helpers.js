@@ -5,7 +5,7 @@
 // Contiene SOLO código que no depende del estado de los componentes grandes
 // (Almacenero, Planner, Aprobador, Gerente).
 // ─────────────────────────────────────────────────────────────────────────────
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 const CSS_GLOBAL = `*{box-sizing:border-box}input::placeholder{color:rgba(255,255,255,.4)}@keyframes fadeUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}`;
 const CSS_DRAWER = `@keyframes fadeIn{from{opacity:0}to{opacity:1}}@keyframes slideIn{from{transform:translateX(60px);opacity:0}to{transform:none;opacity:1}}`;
@@ -177,15 +177,96 @@ function KCard({label,value,sub,color,accent}){
   );
 }
 function Toast({msg,type,onClose}){
-  useEffect(()=>{if(!msg)return;const t=setTimeout(onClose,3200);return()=>clearTimeout(t);},[msg]);
+  // Errores requieren más tiempo (8s vs 3.2s) para que el usuario los lea
+  useEffect(()=>{
+    if(!msg) return;
+    const ms = type==="err" ? 8000 : 3200;
+    const t = setTimeout(onClose, ms);
+    return ()=>clearTimeout(t);
+  },[msg,type]);
   if(!msg)return null;
   const bg=type==="ok"?C.ok:type==="err"?C.crit:type==="warn"?C.warn:C.navy;
   return(
-    <div style={{position:"fixed",bottom:24,left:"50%",transform:"translateX(-50%)",
+    <div onClick={onClose} title="Clic para cerrar"
+      style={{position:"fixed",bottom:24,left:"50%",transform:"translateX(-50%)",
       background:bg,color:"#fff",padding:"11px 20px",borderRadius:12,fontSize:13,
-      fontWeight:500,zIndex:9999,boxShadow:"0 4px 20px rgba(0,0,0,.25)",whiteSpace:"nowrap"}}>
+      fontWeight:500,zIndex:9999,boxShadow:"0 4px 20px rgba(0,0,0,.25)",
+      maxWidth:"90vw",textAlign:"center",lineHeight:1.4,cursor:"pointer"}}>
       {msg}
     </div>
+  );
+}
+
+// Abre una imagen (incluso data URLs) en un lightbox modal a pantalla completa.
+// Usamos esto porque los navegadores modernos bloquean window.open con data URLs
+// (medida anti-phishing). Usa DOM puro para invocarse desde cualquier onClick.
+function verImagenAmpliada(src){
+  if(!src) return;
+  const existente = document.getElementById("__lightbox_foto__");
+  if(existente) existente.remove();
+  const overlay = document.createElement("div");
+  overlay.id = "__lightbox_foto__";
+  Object.assign(overlay.style, {
+    position:"fixed", inset:"0", background:"rgba(0,0,0,0.92)",
+    display:"flex", alignItems:"center", justifyContent:"center",
+    zIndex:"99999", cursor:"zoom-out", padding:"20px",
+  });
+  const img = document.createElement("img");
+  img.src = src;
+  Object.assign(img.style, {
+    maxWidth:"100%", maxHeight:"100%", objectFit:"contain",
+    boxShadow:"0 10px 40px rgba(0,0,0,.6)", borderRadius:"8px",
+  });
+  const close = document.createElement("button");
+  close.innerHTML = "✕";
+  Object.assign(close.style, {
+    position:"absolute", top:"16px", right:"16px",
+    background:"rgba(255,255,255,.15)", color:"#fff",
+    border:"1px solid rgba(255,255,255,.3)", borderRadius:"50%",
+    width:"40px", height:"40px", fontSize:"18px", cursor:"pointer",
+  });
+  const cerrar = () => { overlay.remove(); document.removeEventListener("keydown", onKey); };
+  const onKey = (e) => { if(e.key==="Escape") cerrar(); };
+  overlay.addEventListener("click", cerrar);
+  close.addEventListener("click", e => { e.stopPropagation(); cerrar(); });
+  img.addEventListener("click", e => e.stopPropagation());
+  document.addEventListener("keydown", onKey);
+  overlay.appendChild(img);
+  overlay.appendChild(close);
+  document.body.appendChild(overlay);
+}
+
+// Botón de refrescar reutilizable
+function BotonRefrescar({onRecargar, onToast, dark=false}){
+  const [cargando, setCargando] = useState(false);
+  const handleClick = async () => {
+    if(cargando) return;
+    setCargando(true);
+    try{
+      await onRecargar();
+      if(onToast) onToast({msg:"✓ Datos actualizados",type:"ok"});
+    }catch(e){
+      if(onToast) onToast({msg:"Error al recargar: "+(e?.message||"red"),type:"err"});
+    }finally{
+      setTimeout(()=>setCargando(false), 300);
+    }
+  };
+  const style = dark
+    ? {background:"rgba(255,255,255,.15)",color:"#fff",border:"none"}
+    : {background:"#fff",color:C.txt2,border:`1px solid ${C.bdr}`};
+  return(
+    <>
+      <style>{"@keyframes spinR{to{transform:rotate(360deg)}}"}</style>
+      <button onClick={handleClick} disabled={cargando}
+        title="Recargar datos desde Firebase"
+        style={{...style,borderRadius:8,padding:"6px 12px",fontSize:11,
+          cursor:cargando?"wait":"pointer",fontFamily:"inherit",
+          display:"flex",alignItems:"center",gap:6,opacity:cargando?.7:1,fontWeight:500}}>
+        <span style={{display:"inline-block",
+          animation: cargando ? "spinR 0.8s linear infinite" : "none"}}>↻</span>
+        {cargando?"Actualizando...":"Refrescar"}
+      </button>
+    </>
   );
 }
 
@@ -225,4 +306,5 @@ export {
   C, S,
   actividadesPorTipo, getRatio, buildUnified,
   Badge, KCard, Toast,
+  verImagenAmpliada, BotonRefrescar,
 };

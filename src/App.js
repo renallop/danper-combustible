@@ -12,6 +12,7 @@ import {
   C, S,
   actividadesPorTipo, getRatio, buildUnified,
   Badge, KCard, Toast,
+  verImagenAmpliada, BotonRefrescar,
 } from "./helpers";
 
 function Login({onLogin,users}){
@@ -281,6 +282,15 @@ function AppAlmacenero({user,onLogout,maestros,vales,setVales}){
       setAlertaMsg(`${gl.toFixed(1)} gl supera el umbral estimado de ${(umbral*1.2).toFixed(1)} gl · Ratio teórico: ${teoLabel}`);
     }else setShowAlerta(false);
   },[gl,teoRatio,equipo]);
+  // Si cambia fundo o equipo, resetear candado (es otro contexto)
+  useEffect(()=>{
+    if(candadoOk !== null){
+      setCandadoOk(null);
+      setIncidenteNota("");
+      setIncidenteFoto(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[form.fundo, form.equipoId]);
   const handleValeNumChange = async(n)=>{
     setValeNum(n);
     try{ await guardarCounter(n); }catch(e){ console.warn(e); }
@@ -392,8 +402,18 @@ function AppAlmacenero({user,onLogout,maestros,vales,setVales}){
       <div style={{padding:14}}>
       {tab==="nuevo"?(
         <>
-          {/* VERIFICACIÓN DE CANDADO */}
-          {candadoOk===null&&(
+          {/* Banner informativo cuando faltan datos básicos */}
+          {(!form.fundo || !form.equipoId) && candadoOk===null && (
+            <div style={{background:"#FEF3C7",border:"1px solid #F59E0B",borderRadius:10,
+              padding:"10px 14px",marginBottom:14,display:"flex",alignItems:"center",gap:10}}>
+              <span style={{fontSize:20}}>👉</span>
+              <div style={{fontSize:12,color:"#78350F"}}>
+                <b>Paso 1:</b> Seleccione el fundo y el equipo. Luego se le pedirá verificar el candado de seguridad.
+              </div>
+            </div>
+          )}
+          {/* VERIFICACIÓN DE CANDADO — solo cuando ya hay fundo+equipo seleccionados */}
+          {form.fundo && form.equipoId && candadoOk===null&&(
             <div style={{background:"#fff",border:`2px solid ${C.navy}`,borderRadius:14,
               padding:20,marginBottom:16,boxShadow:"0 2px 12px rgba(0,0,0,.08)"}}>
               <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
@@ -529,12 +549,19 @@ function AppAlmacenero({user,onLogout,maestros,vales,setVales}){
                       fecha:new Date().toISOString().slice(0,10),
                       hora:new Date().toLocaleTimeString("es-PE"),
                       almacenero:user.nombre||user.usuario,
+                      // Contexto del lugar/equipo donde se detectó el problema
+                      fundo: form.fundo || "—",
+                      equipoId: form.equipoId || "—",
+                      equipoDen: equipo?.den || "—",
+                      placa: equipo?.placa || "",
+                      tipoEquipo: equipo?.tipo || tipoFiltro || "—",
                       nota:incidenteNota||"Sin descripción",
                       foto:incidenteFoto||null,
+                      revisado:false,
                       timestamp:new Date().toISOString()};
                     try{ await guardar("incidentes",Date.now().toString(),inc);
                       setToast({msg:"⚠ Incidente reportado",type:"warn"});
-                    }catch(e){console.warn(e);}
+                    }catch(e){console.warn(e); setToast({msg:"Error: "+e.message,type:"err"});}
                     setCandadoOk(false);
                     setShowCandadoModal(false);
                   }}
@@ -550,10 +577,8 @@ function AppAlmacenero({user,onLogout,maestros,vales,setVales}){
               </div>
             </>
           )}
-          {/* Bloquear formulario hasta verificar candado */}
-          <div style={{opacity:candadoOk===null?0.3:1,
-            pointerEvents:candadoOk===null?"none":"auto",
-            transition:"opacity .3s"}}>
+          {/* Form sin bloqueo opacity — la validación del candado se hace al guardar */}
+          <div>
           <div style={S.card}>
             <div style={S.sec}>1 · Tipo de equipo</div>
             <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:8}}>
@@ -1414,13 +1439,13 @@ function DrawerDetalle({drawer,setDrawer,drawerTab,setDrawerTab,vales,maestros})
                       <div style={{marginTop:8}}>
                         <div style={{fontSize:9,color:C.txt3,marginBottom:3,display:"flex",justifyContent:"space-between"}}>
                           <span>📸 Foto del medidor</span>
-                          <button onClick={e=>{e.stopPropagation();window.open(v.fotoMedidor,"_blank");}}
+                          <button onClick={e=>{e.stopPropagation();verImagenAmpliada(v.fotoMedidor);}}
                             style={{fontSize:9,color:C.blue,background:"none",border:`1px solid ${C.blue}`,borderRadius:4,padding:"1px 6px",cursor:"pointer",fontFamily:"inherit"}}>
                             🔍 Ampliar
                           </button>
                         </div>
                         <img src={v.fotoMedidor} alt="medidor"
-                          onClick={e=>{e.stopPropagation();window.open(v.fotoMedidor,"_blank");}}
+                          onClick={e=>{e.stopPropagation();verImagenAmpliada(v.fotoMedidor);}}
                           style={{width:"100%",maxHeight:80,objectFit:"cover",borderRadius:6,
                             border:`1px solid ${C.bdr}`,cursor:"zoom-in"}}/>
                       </div>
@@ -1436,7 +1461,7 @@ function DrawerDetalle({drawer,setDrawer,drawerTab,setDrawerTab,vales,maestros})
     </>
   );
 };
-function DashboardPlanner({user,onLogout,maestros,setMaestros,vales,users,setUsers}){
+function DashboardPlanner({user,onLogout,maestros,setMaestros,vales,users,setUsers,recargarDatos}){
   const [view,setView]=useState("resumen");
   const [toast,setToast]=useState({msg:""});
     const [eqInput,setEqInput]=useState({den:"",tipo:"TRACTOR",placa:""});
@@ -1455,6 +1480,7 @@ function DashboardPlanner({user,onLogout,maestros,setMaestros,vales,users,setUse
   const [sortCol,setSortCol]=useState("diff");
   const [sortDir,setSortDir]=useState(-1);
   const [showGraf,setShowGraf]=useState(true);
+  const [normPeriodo,setNormPeriodo]=useState("semana"); // hoy | semana | mes | todo
   const [tFiltro,setTFiltro]=useState({tipo:"",fundo:"",cultivo:"",search:"",estado:""});
   const [tSort,setTSort]=useState({col:"fecha",dir:-1});
   const [tHover,setTHover]=useState(null);
@@ -1700,7 +1726,8 @@ function DashboardPlanner({user,onLogout,maestros,setMaestros,vales,users,setUse
           <span style={{fontSize:11,color:C.txt2,background:C.surf2,border:`1px solid ${C.bdr}`,padding:"3px 10px",borderRadius:20}}>
             {kpis.total_reg} registros
           </span>
-          <div style={{marginLeft:"auto",display:"flex",gap:8}}>
+          <div style={{marginLeft:"auto",display:"flex",gap:8,alignItems:"center"}}>
+            {recargarDatos && <BotonRefrescar onRecargar={recargarDatos} onToast={setToast}/>}
             <button onClick={exportExcel}
               style={{display:"flex",alignItems:"center",gap:5,padding:"6px 12px",
                 background:"#166534",color:"#fff",border:"none",borderRadius:8,
@@ -1921,6 +1948,87 @@ function DashboardPlanner({user,onLogout,maestros,setMaestros,vales,users,setUse
                     </table>
                   </div>
                 </div>
+
+                {/* ── Tabla de consumos en rango (registros normales) ── */}
+                {(()=>{
+                  const hoy = new Date().toISOString().slice(0,10);
+                  const semAgo = new Date(Date.now()-7*86400000).toISOString().slice(0,10);
+                  const mesAgo = new Date(Date.now()-30*86400000).toISOString().slice(0,10);
+                  let normRows = rRows.filter(r => r.fuente==="app" && !r.af);
+                  if(normPeriodo==="hoy")    normRows = normRows.filter(r=>r.fe===hoy);
+                  if(normPeriodo==="semana") normRows = normRows.filter(r=>r.fe>=semAgo);
+                  if(normPeriodo==="mes")    normRows = normRows.filter(r=>r.fe>=mesAgo);
+                  const enrich = normRows.map(r=>{
+                    const v = vales.find(x=>x.nVale===r.nVale) || {};
+                    return {...r, cultivo:v.cultivo||"—", hora:v.hora||""};
+                  }).sort((a,b)=>{
+                    const fa = (a.fe||"")+" "+(a.hora||"");
+                    const fb = (b.fe||"")+" "+(b.hora||"");
+                    return fb.localeCompare(fa);
+                  });
+                  const totalGl = enrich.reduce((s,r)=>s+(r.gl_real||0), 0);
+                  return(
+                    <div style={{background:C.surf,border:`1px solid ${C.bdr}`,borderRadius:12,
+                      overflow:"hidden",boxShadow:"0 1px 3px rgba(0,0,0,.06)",marginTop:14}}>
+                      <div style={{padding:"12px 16px",borderBottom:`1px solid ${C.bdr}`,
+                        display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                        <span style={{fontSize:13,fontWeight:700,color:C.ok}}>✓ Consumos en rango</span>
+                        <div style={{display:"flex",gap:5,marginLeft:8}}>
+                          {[["hoy","Hoy"],["semana","Semana"],["mes","Mes"],["todo","Todo"]].map(([k,l])=>(
+                            <button key={k} onClick={()=>setNormPeriodo(k)}
+                              style={{padding:"3px 10px",borderRadius:14,fontSize:10,fontWeight:600,cursor:"pointer",
+                                border:`1.5px solid ${normPeriodo===k?C.ok:C.bdr}`,
+                                background:normPeriodo===k?"#DCFCE7":"#fff",
+                                color:normPeriodo===k?"#166534":C.txt2,fontFamily:"inherit"}}>{l}</button>
+                          ))}
+                        </div>
+                        <span style={{marginLeft:"auto",fontSize:10,color:C.txt3}}>
+                          {enrich.length} registros · {totalGl.toFixed(1)} gl Σ
+                        </span>
+                      </div>
+                      <div style={{overflowX:"auto",maxHeight:340,overflowY:"auto"}}>
+                        <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+                          <thead style={{position:"sticky",top:0,background:C.surf2}}>
+                            <tr style={{borderBottom:`1px solid ${C.bdr}`}}>
+                              {["Fecha","Equipo","Tipo","Cultivo","Fundo","Gal. reales","Gal. esp.","Δ","Chofer","Aprobación"].map(h=>(
+                                <th key={h} style={{padding:"7px 10px",textAlign:"left",fontSize:10,fontWeight:700,color:C.txt3,textTransform:"uppercase",letterSpacing:.4,whiteSpace:"nowrap"}}>{h}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {enrich.map((r,i)=>{
+                              const rowBg = i%2===0 ? "#fff" : "#F8FAFC";
+                              return(
+                                <tr key={i} style={{borderBottom:`0.5px solid ${C.bdr}`,background:rowBg,cursor:"pointer"}}
+                                  onClick={()=>{setDrawer({id:r.id,den:r.ef,tipo:r.t});setDrawerTab("app");}}>
+                                  <td style={{padding:"6px 10px",fontFamily:"monospace",color:C.txt3,whiteSpace:"nowrap"}}>{r.fe}</td>
+                                  <td style={{padding:"6px 10px",fontWeight:600,maxWidth:160,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.ef}</td>
+                                  <td style={{padding:"6px 10px"}}><Badge type={r.t}>{r.t==="T"?"TRACTOR":r.t==="I"?"CISTERNA":"CAMIÓN"}</Badge></td>
+                                  <td style={{padding:"6px 10px"}}>
+                                    {r.cultivo&&r.cultivo!=="—"
+                                      ?<span style={{fontSize:10,fontWeight:600,background:"#DCFCE7",color:"#166534",padding:"2px 7px",borderRadius:10}}>🌱 {r.cultivo}</span>
+                                      :<span style={{color:C.txt3,fontSize:10}}>—</span>}
+                                  </td>
+                                  <td style={{padding:"6px 10px"}}>{r.fu||"—"}</td>
+                                  <td style={{padding:"6px 10px",fontFamily:"monospace",color:C.blue,fontWeight:700}}>{r.gl_real?.toFixed(1)} gl</td>
+                                  <td style={{padding:"6px 10px",fontFamily:"monospace",color:C.txt3}}>{r.gl_esp!=null?r.gl_esp.toFixed(1)+" gl":"—"}</td>
+                                  <td style={{padding:"6px 10px",fontFamily:"monospace",color:C.ok,fontWeight:700}}>{r.diff!=null?(r.diff>0?"+":"")+r.diff.toFixed(1):"—"}</td>
+                                  <td style={{padding:"6px 10px",maxWidth:120,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.chofer||"—"}</td>
+                                  <td style={{padding:"6px 10px"}}>{r.aprobado?<span style={{fontSize:10,fontWeight:700,color:C.ok}}>✅</span>:r.rechazado?<span style={{fontSize:10,fontWeight:700,color:C.crit}}>✕</span>:<span style={{fontSize:10,fontWeight:700,color:C.warn}}>⏳</span>}</td>
+                                </tr>
+                              );
+                            })}
+                            {enrich.length===0 && (
+                              <tr><td colSpan={10} style={{textAlign:"center",padding:"28px",color:C.txt3}}>
+                                Sin consumos en rango para el período "{normPeriodo}"
+                              </td></tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  );
+                })()}
                 {vales.length>0&&(
                   <div style={{background:"#EDE9FE",border:"1px solid #C4B5FD",borderRadius:12,padding:12,marginTop:12,display:"flex",alignItems:"center",gap:10}}>
                     <span style={{fontSize:18}}>📱</span>
@@ -2131,6 +2239,7 @@ function DashboardPlanner({user,onLogout,maestros,setMaestros,vales,users,setUse
                             <th style={{padding:"7px 10px",fontSize:10,fontWeight:700,color:C.txt3,textTransform:"uppercase",letterSpacing:.4,whiteSpace:"nowrap",background:C.surf2}}>Hora</th>
                             <SortTh col="equipo" label="Equipo"/>
                             <SortTh col="fundo" label="Fundo"/>
+                            <th style={{padding:"7px 10px",fontSize:10,fontWeight:700,color:C.txt3,textTransform:"uppercase",letterSpacing:.4,whiteSpace:"nowrap",background:C.surf2}}>Cultivo</th>
                             <th style={{padding:"7px 10px",fontSize:10,fontWeight:700,color:C.txt3,textTransform:"uppercase",letterSpacing:.4,whiteSpace:"nowrap",background:C.surf2}}>Actividad</th>
                             <SortTh col="gl" label="Galones" right/>
                             <SortTh col="chofer" label="Chofer"/>
@@ -2153,12 +2262,15 @@ function DashboardPlanner({user,onLogout,maestros,setMaestros,vales,users,setUse
                                 <td style={{padding:"7px 10px",fontFamily:"monospace",color:C.txt3}}>{v.hora}</td>
                                 <td style={{padding:"7px 10px",fontWeight:600,maxWidth:160,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",color:isH?C.blue:C.txt}}>{v.equipoDen}</td>
                                 <td style={{padding:"7px 10px"}}>{v.fundo}</td>
+                                <td style={{padding:"7px 10px"}}>
+                                  {v.cultivo?<span style={{fontSize:10,fontWeight:600,background:"#DCFCE7",color:"#166534",padding:"2px 7px",borderRadius:10}}>🌱 {v.cultivo}</span>:<span style={{color:C.txt3,fontSize:10}}>—</span>}
+                                </td>
                                 <td style={{padding:"7px 10px",color:C.txt3,maxWidth:140,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{v.actividad}</td>
                                 <td style={{padding:"7px 10px",fontFamily:"monospace",color:C.blue,fontWeight:700,textAlign:"right"}}>{v.gl.toFixed(1)} gl</td>
                                 <td style={{padding:"7px 10px",fontWeight:600}}>{v.chofer}</td>
                                 <td style={{padding:"7px 10px"}}>{v.aprobado?<span style={{color:C.ok,fontSize:11,fontWeight:700}}>✅ Aprobado</span>:v.rechazado?<span style={{color:C.crit,fontSize:11,fontWeight:700}}>✕ Rechazado</span>:<span style={{color:C.warn,fontSize:11,fontWeight:700}}>⏳ Pendiente</span>}</td>
-                                <td style={{padding:"7px 8px",textAlign:"center",fontSize:16}} title={v.candadoVerificado===true?"Candado OK":v.candadoVerificado===false?"⚠ Incidente reportado":"Sin verificar"}>
-                                  {v.candadoVerificado===true?"🔒✅":v.candadoVerificado===false?"🔓⚠️":"—"}
+                                <td style={{padding:"7px 8px",textAlign:"center",fontSize:16}} title={v.candadoOk===true?"Candado OK":v.candadoOk===false?"⚠ Incidente reportado":"Sin verificar"}>
+                                  {v.candadoOk===true?"🔒✅":v.candadoOk===false?"🔓⚠️":"—"}
                                 </td>
                                 <td style={{padding:"5px 8px",textAlign:"center"}}>
                                   {v.fotoMedidor
@@ -2166,7 +2278,7 @@ function DashboardPlanner({user,onLogout,maestros,setMaestros,vales,users,setUse
                                         src={v.fotoMedidor}
                                         alt="medidor"
                                         title="Clic para ampliar"
-                                        onClick={e=>{e.stopPropagation();window.open(v.fotoMedidor,"_blank");}}
+                                        onClick={e=>{e.stopPropagation();verImagenAmpliada(v.fotoMedidor);}}
                                         style={{height:40,width:56,objectFit:"cover",borderRadius:5,
                                           border:`1px solid ${C.bdr}`,cursor:"zoom-in",display:"block"}}/>
                                     :<span style={{fontSize:10,color:C.txt3}}>—</span>}
@@ -2174,7 +2286,7 @@ function DashboardPlanner({user,onLogout,maestros,setMaestros,vales,users,setUse
                               </tr>
                             );
                           })}
-                          {rows.length===0&&<tr><td colSpan={11} style={{textAlign:"center",padding:"28px",color:C.txt3}}>Sin registros para los filtros seleccionados</td></tr>}
+                          {rows.length===0&&<tr><td colSpan={12} style={{textAlign:"center",padding:"28px",color:C.txt3}}>Sin registros para los filtros seleccionados</td></tr>}
                         </tbody>
                       </table>
                     </div>
@@ -2184,6 +2296,98 @@ function DashboardPlanner({user,onLogout,maestros,setMaestros,vales,users,setUse
             );
           })()}
           
+          {view==="incidentes"&&(()=>{
+            const incOrden = [...incidentes].sort((a,b)=>(b.timestamp||"").localeCompare(a.timestamp||""));
+            const sinRevisar = incOrden.filter(i=>!i.revisado);
+            const revisados  = incOrden.filter(i=>i.revisado);
+            const marcarRevisado = async(inc)=>{
+              try{
+                await guardar("incidentes", inc._fireId, {...inc, revisado:true, revisadoPor:user.nombre||user.usuario, revisadoEn:new Date().toISOString()});
+                setToast({msg:"✓ Incidente marcado como revisado",type:"ok"});
+              }catch(e){ setToast({msg:"Error: "+e.message,type:"err"}); }
+            };
+            const IncidenteCard = ({inc, revisado=false}) => (
+              <div style={{background:revisado?"#F9FAFB":"#FEF2F2",border:`1px solid ${revisado?C.bdr:"#FCA5A5"}`,
+                borderRadius:10,padding:14,marginBottom:10}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10,marginBottom:8}}>
+                  <div style={{flex:1}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4,flexWrap:"wrap"}}>
+                      <span style={{fontSize:18}}>{inc.tipo==="CANDADO_PROBLEMA"?"🔓":"⚠️"}</span>
+                      <span style={{fontSize:13,fontWeight:700,color:revisado?C.txt2:"#991B1B"}}>
+                        {inc.tipo==="CANDADO_PROBLEMA"?"Candado/tapa en mal estado":(inc.tipo||"Incidente")}
+                      </span>
+                      {revisado && <span style={{fontSize:9,fontWeight:700,color:C.ok,background:"#DCFCE7",borderRadius:8,padding:"2px 7px"}}>✓ REVISADO</span>}
+                    </div>
+                    <div style={{fontSize:11,color:C.txt3}}>
+                      📅 {inc.fecha} · ⏰ {inc.hora} · 👤 {inc.almacenero||"—"}
+                    </div>
+                    {(inc.fundo || inc.equipoDen) && (inc.fundo!=="—" || inc.equipoDen!=="—") && (
+                      <div style={{fontSize:11,color:C.txt2,marginTop:3,fontWeight:600}}>
+                        {inc.fundo && inc.fundo!=="—" && <>📍 {inc.fundo}</>}
+                        {inc.equipoDen && inc.equipoDen!=="—" && <> · 🚜 {inc.equipoDen}{inc.placa?` (${inc.placa})`:""}</>}
+                      </div>
+                    )}
+                    <div style={{fontSize:12,color:C.txt2,marginTop:6,padding:"6px 10px",background:revisado?"#fff":"rgba(255,255,255,.7)",borderRadius:6,border:`1px solid ${C.bdr}`}}>
+                      <span style={{fontWeight:600,fontSize:10,color:C.txt3,textTransform:"uppercase"}}>Descripción: </span>
+                      {inc.nota||"Sin descripción"}
+                    </div>
+                    {revisado && inc.revisadoPor && (
+                      <div style={{fontSize:10,color:C.txt3,marginTop:5,fontStyle:"italic"}}>
+                        Revisado por {inc.revisadoPor} el {inc.revisadoEn?new Date(inc.revisadoEn).toLocaleString("es-PE"):"—"}
+                      </div>
+                    )}
+                  </div>
+                  {!revisado && (
+                    <button onClick={()=>marcarRevisado(inc)}
+                      style={{padding:"6px 12px",background:C.ok,color:"#fff",border:"none",borderRadius:8,
+                        fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
+                      ✓ Marcar revisado
+                    </button>
+                  )}
+                </div>
+                {inc.foto && (
+                  <div style={{marginTop:8}}>
+                    <img src={inc.foto} alt="incidente"
+                      onClick={()=>verImagenAmpliada(inc.foto)}
+                      style={{maxWidth:200,maxHeight:140,objectFit:"cover",borderRadius:6,
+                        border:`1px solid ${C.bdr}`,cursor:"zoom-in"}}/>
+                  </div>
+                )}
+              </div>
+            );
+            return(
+              <>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:14}}>
+                  <KCard label="Total incidentes" value={incidentes.length} sub="histórico"/>
+                  <KCard label="Sin revisar" value={sinRevisar.length} sub="requieren atención" color={C.crit} accent={C.crit}/>
+                  <KCard label="Revisados" value={revisados.length} sub="cerrados" color={C.ok} accent={C.ok}/>
+                </div>
+                {sinRevisar.length>0 && (
+                  <div style={{marginBottom:18}}>
+                    <div style={{fontSize:12,fontWeight:700,marginBottom:10,color:"#991B1B"}}>
+                      ⚠ Incidentes sin revisar ({sinRevisar.length})
+                    </div>
+                    {sinRevisar.map((inc,i)=><IncidenteCard key={inc._fireId||i} inc={inc}/>)}
+                  </div>
+                )}
+                {revisados.length>0 && (
+                  <div>
+                    <div style={{fontSize:12,fontWeight:700,marginBottom:10,color:C.txt3}}>
+                      ✓ Historial revisados ({revisados.length})
+                    </div>
+                    {revisados.map((inc,i)=><IncidenteCard key={inc._fireId||i} inc={inc} revisado/>)}
+                  </div>
+                )}
+                {incidentes.length===0 && (
+                  <div style={{textAlign:"center",padding:"60px 20px",color:C.txt3}}>
+                    <div style={{fontSize:48,marginBottom:12}}>🟢</div>
+                    <div style={{fontSize:14,fontWeight:600}}>No hay incidentes reportados</div>
+                  </div>
+                )}
+              </>
+            );
+          })()}
+
           {view==="usuarios"&&(
             <div style={{background:C.surf,border:`1px solid ${C.bdr}`,borderRadius:12,padding:16}}>
               <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
@@ -2438,7 +2642,7 @@ function AppAprobador({user,onLogout,vales,setVales,users,precioPorGalon=18.5}){
           <div style={{marginBottom:10}}>
             <div style={{fontSize:9,color:C.txt3,marginBottom:3,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
               <span>📸 Foto del medidor de combustible</span>
-              <button onClick={()=>window.open(v.fotoMedidor,"_blank")}
+              <button onClick={()=>verImagenAmpliada(v.fotoMedidor)}
                 style={{fontSize:9,color:C.blue,background:"none",border:`1px solid ${C.blue}`,
                   borderRadius:5,padding:"1px 7px",cursor:"pointer",fontFamily:"inherit"}}>
                 🔍 Ampliar
@@ -2446,7 +2650,7 @@ function AppAprobador({user,onLogout,vales,setVales,users,precioPorGalon=18.5}){
             </div>
             <img src={v.fotoMedidor} alt="medidor"
               title="Clic para ampliar"
-              onClick={()=>window.open(v.fotoMedidor,"_blank")}
+              onClick={()=>verImagenAmpliada(v.fotoMedidor)}
               style={{width:"100%",maxHeight:110,border:`1px solid ${C.bdr}`,borderRadius:8,
                 objectFit:"cover",cursor:"zoom-in"}}/>
           </div>
@@ -2669,7 +2873,7 @@ function GerMantActividadesCard({maestros,onGuardarMaestros,setToast}){
   );
 }
 
-function AppGerente({user,onLogout,vales,setVales,users,setUsers,maestros:maestrosProp}){
+function AppGerente({user,onLogout,vales,setVales,users,setUsers,maestros:maestrosProp,recargarDatos}){
   const [view,setView]=useState("vales");
   const [toast,setToast]=useState({msg:""});
   const [editId,setEditId]=useState(null);
@@ -2678,6 +2882,8 @@ function AppGerente({user,onLogout,vales,setVales,users,setUsers,maestros:maestr
   const [logFilter,setLogFilter]=useState("");
   const [editUser,setEditUser]=useState(null);
   const [newUser,setNewUser]=useState({usuario:"",pass:"",nombre:"",rol:"alm",cultivos:[]});
+  const [gerFiltro,setGerFiltro]=useState({estado:"",fundo:"",cultivo:"",tipo:"",search:""});
+  const [gerSort,setGerSort]=useState({col:"fecha",dir:-1});
   const RED="#C8102E";
   // Cargar maestros propios desde Firebase (no depender del prop del padre)
   const [maestros,setMaestrosLocal]=useState(maestrosProp||{});
@@ -2714,7 +2920,10 @@ function AppGerente({user,onLogout,vales,setVales,users,setUsers,maestros:maestr
           <div style={{color:"#fff",fontSize:13,fontWeight:700}}>Panel de Gerencia</div>
           <div style={{color:"rgba(255,255,255,.7)",fontSize:10}}>{user.nombre} · Edición con trazabilidad</div>
         </div>
-        <button onClick={onLogout} style={{marginLeft:"auto",background:"rgba(255,255,255,.1)",border:"none",borderRadius:7,color:"#fff",padding:"6px 12px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>Salir</button>
+        <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:8}}>
+          {recargarDatos && <BotonRefrescar onRecargar={recargarDatos} onToast={setToast} dark/>}
+          <button onClick={onLogout} style={{background:"rgba(255,255,255,.1)",border:"none",borderRadius:7,color:"#fff",padding:"6px 12px",fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>Salir</button>
+        </div>
       </div>
       <div style={{display:"flex",gap:6,padding:"12px 16px 0",flexWrap:"wrap"}}>
         {[["vales","📋 Registros"],["log","📜 Log auditoría"],["usuarios","👥 Usuarios"],["params","⚙ Actividades/Ratios"]].map(([t,l])=>(
@@ -2722,44 +2931,221 @@ function AppGerente({user,onLogout,vales,setVales,users,setUsers,maestros:maestr
         ))}
       </div>
       <div style={{padding:14}}>
-        {view==="vales"&&(
-          <div>
-            <div style={{background:"#FEF3C7",border:"1px solid #F59E0B",borderRadius:10,padding:"10px 14px",marginBottom:14,fontSize:12,color:"#92400E"}}>
-              ⚠ <strong>Corrección:</strong> Todos los cambios quedan en el log de auditoría con fecha, editor y motivo. No se borra información.
-            </div>
-            {vales.length===0&&<p style={{textAlign:"center",color:C.txt3,padding:32}}>Sin vales.</p>}
-            {vales.map(v=>(
-              <div key={v.id} style={{background:C.surf,border:`1.5px solid ${v._corregido?"#F59E0B":C.bdr}`,borderRadius:12,padding:14,marginBottom:10}}>
-                <div style={{display:"flex",justifyContent:"space-between",marginBottom:8,gap:8}}>
-                  <div style={{flex:1}}>
-                    <span style={{fontWeight:700,fontSize:13}}>{v.equipoDen}</span>
-                    {v._corregido&&<span style={{fontSize:10,background:"#FEF3C7",color:"#92400E",padding:"1px 6px",borderRadius:4,fontWeight:600,marginLeft:6}}>✏ Corregido{(v._log||[]).length>0&&` (${(v._log||[]).length})`}</span>}
-                    <div style={{fontSize:10,color:C.txt3,marginTop:2}}>{v.fecha} {v.hora} · {v.nVale} · {v.fundo}</div>
-                  </div>
-                  <div style={{display:"flex",gap:6,alignItems:"flex-start"}}>
-                    {v.aprobado?<Badge type="ok">✅</Badge>:v.rechazado?<Badge type="warn">✕</Badge>:<span style={{fontSize:10,color:C.warn,fontWeight:600}}>⏳</span>}
-                    {editId===v.id?<button onClick={()=>setEditId(null)} style={{padding:"4px 10px",fontSize:10,border:`1px solid ${C.bdr}`,borderRadius:6,background:C.surf2,cursor:"pointer",fontFamily:"inherit"}}>Cancelar</button>:<button onClick={()=>startEdit(v)} style={{padding:"4px 10px",fontSize:10,background:RED,color:"#fff",border:"none",borderRadius:6,cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>✏ Editar</button>}
-                  </div>
+        {view==="vales"&&(()=>{
+          const valesFiltrados = vales.filter(v=>{
+            if(gerFiltro.estado==="aprobado"  && !v.aprobado) return false;
+            if(gerFiltro.estado==="rechazado" && !v.rechazado) return false;
+            if(gerFiltro.estado==="pendiente" && (v.aprobado||v.rechazado)) return false;
+            if(gerFiltro.estado==="corregido" && !v._corregido) return false;
+            if(gerFiltro.estado==="alerta"    && !v.alertaEnviada) return false;
+            if(gerFiltro.fundo   && v.fundo!==gerFiltro.fundo) return false;
+            if(gerFiltro.cultivo && v.cultivo!==gerFiltro.cultivo) return false;
+            if(gerFiltro.tipo    && v.tipo!==gerFiltro.tipo) return false;
+            if(gerFiltro.search){
+              const q = gerFiltro.search.toLowerCase();
+              const hay = [v.equipoDen,v.fundo,v.chofer,v.almacenero,v.actividad,v.nVale,v.producto]
+                .map(x=>(x||"").toLowerCase()).join(" ");
+              if(!hay.includes(q)) return false;
+            }
+            return true;
+          }).sort((a,b)=>{
+            const c=gerSort.col, d=gerSort.dir;
+            const va = c==="gl"?a.gl: c==="fecha"?`${a.fecha} ${a.hora}`: a[c]||"";
+            const vb = c==="gl"?b.gl: c==="fecha"?`${b.fecha} ${b.hora}`: b[c]||"";
+            if(typeof va==="number") return d*(vb-va);
+            return d*String(va).localeCompare(String(vb));
+          });
+          const SortTh = ({col,label,right})=>(
+            <th onClick={()=>setGerSort(s=>({col,dir:s.col===col?-s.dir:-1}))}
+              style={{padding:"8px 10px",textAlign:right?"right":"left",fontSize:10,fontWeight:700,
+                color:gerSort.col===col?RED:C.txt3,textTransform:"uppercase",letterSpacing:.4,
+                whiteSpace:"nowrap",cursor:"pointer",userSelect:"none",background:C.surf2,position:"sticky",top:0,zIndex:1}}>
+              {label} {gerSort.col===col?(gerSort.dir===-1?"↓":"↑"):""}
+            </th>
+          );
+          const Th = ({children,right})=>(
+            <th style={{padding:"8px 10px",textAlign:right?"right":"left",fontSize:10,fontWeight:700,
+              color:C.txt3,textTransform:"uppercase",letterSpacing:.4,whiteSpace:"nowrap",
+              background:C.surf2,position:"sticky",top:0,zIndex:1}}>{children}</th>
+          );
+          const totalGl   = valesFiltrados.reduce((s,v)=>s+(v.gl||0),0);
+          const pendientes= valesFiltrados.filter(v=>!v.aprobado&&!v.rechazado).length;
+          const corregidos= valesFiltrados.filter(v=>v._corregido).length;
+          const alertas   = valesFiltrados.filter(v=>v.alertaEnviada).length;
+          return(
+            <div>
+              <div style={{background:"#FEF3C7",border:"1px solid #F59E0B",borderRadius:10,padding:"10px 14px",marginBottom:14,fontSize:12,color:"#92400E"}}>
+                ⚠ <strong>Corrección:</strong> Clic en una fila para editar. Todos los cambios quedan en el log de auditoría.
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:8,marginBottom:14}}>
+                <div style={{background:C.surf,border:`1px solid ${C.bdr}`,borderRadius:10,padding:"10px 12px",borderTop:`3px solid ${C.navy}`}}>
+                  <div style={{fontSize:9,fontWeight:700,color:C.txt3,textTransform:"uppercase",letterSpacing:.5,marginBottom:4}}>Total</div>
+                  <div style={{fontSize:18,fontWeight:700,color:C.navy}}>{valesFiltrados.length}</div>
                 </div>
-                {editId!==v.id&&<div style={{display:"flex",gap:12,flexWrap:"wrap",fontSize:11}}><span style={{color:C.blue,fontWeight:700}}>{v.gl?.toFixed(1)} gl</span><span>·</span><span>{v.producto}</span><span>·</span><span>{v.actividad}</span><span>·</span><span>Chofer: <strong>{v.chofer}</strong></span></div>}
-                {editId===v.id&&(
-                  <div style={{borderTop:`1px solid ${C.bdr}`,paddingTop:12,marginTop:8}}>
-                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:8}}>
+                <div style={{background:C.surf,border:`1px solid ${C.bdr}`,borderRadius:10,padding:"10px 12px",borderTop:`3px solid ${C.blue}`}}>
+                  <div style={{fontSize:9,fontWeight:700,color:C.txt3,textTransform:"uppercase",letterSpacing:.5,marginBottom:4}}>Galones Σ</div>
+                  <div style={{fontSize:18,fontWeight:700,color:C.blue}}>{totalGl.toFixed(1)} gl</div>
+                </div>
+                <div style={{background:C.surf,border:`1px solid ${C.bdr}`,borderRadius:10,padding:"10px 12px",borderTop:`3px solid ${C.warn}`}}>
+                  <div style={{fontSize:9,fontWeight:700,color:C.txt3,textTransform:"uppercase",letterSpacing:.5,marginBottom:4}}>Pendientes</div>
+                  <div style={{fontSize:18,fontWeight:700,color:C.warn}}>{pendientes}</div>
+                </div>
+                <div style={{background:C.surf,border:`1px solid ${C.bdr}`,borderRadius:10,padding:"10px 12px",borderTop:"3px solid #F59E0B"}}>
+                  <div style={{fontSize:9,fontWeight:700,color:C.txt3,textTransform:"uppercase",letterSpacing:.5,marginBottom:4}}>Corregidos</div>
+                  <div style={{fontSize:18,fontWeight:700,color:"#92400E"}}>{corregidos}</div>
+                </div>
+                <div style={{background:C.surf,border:`1px solid ${C.bdr}`,borderRadius:10,padding:"10px 12px",borderTop:`3px solid ${C.crit}`}}>
+                  <div style={{fontSize:9,fontWeight:700,color:C.txt3,textTransform:"uppercase",letterSpacing:.5,marginBottom:4}}>Con alerta</div>
+                  <div style={{fontSize:18,fontWeight:700,color:C.crit}}>{alertas}</div>
+                </div>
+              </div>
+              <div style={{background:C.surf,border:`1px solid ${C.bdr}`,borderRadius:10,padding:"10px 12px",marginBottom:10,display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+                <input placeholder="🔍 Buscar equipo, fundo, chofer, vale..." value={gerFiltro.search}
+                  onChange={e=>setGerFiltro(f=>({...f,search:e.target.value}))}
+                  style={{padding:"6px 10px",border:`1px solid ${C.bdr}`,borderRadius:7,fontSize:11,fontFamily:"inherit",outline:"none",minWidth:240}}/>
+                <select value={gerFiltro.estado} onChange={e=>setGerFiltro(f=>({...f,estado:e.target.value}))}
+                  style={{padding:"6px 10px",border:`1px solid ${C.bdr}`,borderRadius:7,fontSize:11,fontFamily:"inherit",background:gerFiltro.estado?"#FEF3C7":"#fff",WebkitAppearance:"none"}}>
+                  <option value="">— Estado —</option>
+                  <option value="aprobado">✅ Aprobado</option>
+                  <option value="rechazado">✕ Rechazado</option>
+                  <option value="pendiente">⏳ Pendiente</option>
+                  <option value="corregido">✏ Corregido</option>
+                  <option value="alerta">⚠ Con alerta</option>
+                </select>
+                <select value={gerFiltro.fundo} onChange={e=>setGerFiltro(f=>({...f,fundo:e.target.value}))}
+                  style={{padding:"6px 10px",border:`1px solid ${C.bdr}`,borderRadius:7,fontSize:11,fontFamily:"inherit",background:gerFiltro.fundo?"#FEF3C7":"#fff",WebkitAppearance:"none"}}>
+                  <option value="">— Fundo —</option>
+                  {(maestros.fundos||[]).map(f=><option key={f} value={f}>{f}</option>)}
+                </select>
+                <select value={gerFiltro.cultivo} onChange={e=>setGerFiltro(f=>({...f,cultivo:e.target.value}))}
+                  style={{padding:"6px 10px",border:`1px solid ${C.bdr}`,borderRadius:7,fontSize:11,fontFamily:"inherit",background:gerFiltro.cultivo?"#FEF3C7":"#fff",WebkitAppearance:"none"}}>
+                  <option value="">— Cultivo —</option>
+                  {(maestros.cultivos||[]).map(c=><option key={c} value={c}>{c}</option>)}
+                </select>
+                <select value={gerFiltro.tipo} onChange={e=>setGerFiltro(f=>({...f,tipo:e.target.value}))}
+                  style={{padding:"6px 10px",border:`1px solid ${C.bdr}`,borderRadius:7,fontSize:11,fontFamily:"inherit",background:gerFiltro.tipo?"#FEF3C7":"#fff",WebkitAppearance:"none"}}>
+                  <option value="">— Tipo —</option>
+                  {["TRACTOR","CAMION","CISTERNA","MONTACARGAS"].map(t=><option key={t} value={t}>{t}</option>)}
+                </select>
+                {(gerFiltro.estado||gerFiltro.fundo||gerFiltro.cultivo||gerFiltro.tipo||gerFiltro.search)&&(
+                  <button onClick={()=>setGerFiltro({estado:"",fundo:"",cultivo:"",tipo:"",search:""})}
+                    style={{padding:"5px 12px",background:"#FEE2E2",color:"#B91C1C",border:"none",borderRadius:7,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>
+                    ✕ Limpiar
+                  </button>
+                )}
+              </div>
+              <div style={{background:C.surf,border:`1px solid ${C.bdr}`,borderRadius:10,overflow:"hidden"}}>
+                <div style={{maxHeight:560,overflow:"auto"}}>
+                  <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+                    <thead>
+                      <tr style={{borderBottom:`1px solid ${C.bdr}`}}>
+                        <SortTh col="nVale" label="N° Vale"/>
+                        <SortTh col="fecha" label="Fecha · Hora"/>
+                        <SortTh col="equipoDen" label="Equipo"/>
+                        <Th>Tipo</Th>
+                        <Th>Placa</Th>
+                        <SortTh col="fundo" label="Fundo"/>
+                        <Th>Cultivo</Th>
+                        <Th>Actividad</Th>
+                        <Th>Combustible</Th>
+                        <SortTh col="gl" label="Galones" right/>
+                        <Th right>Km/Hr</Th>
+                        <Th>Chofer</Th>
+                        <Th>Almacenero</Th>
+                        <Th>🔒</Th>
+                        <Th>Estado</Th>
+                        <Th>Acciones</Th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {valesFiltrados.map((v,i)=>(
+                        <tr key={v.id}
+                          style={{borderBottom:`0.5px solid ${C.bdr}`,
+                            background: v._corregido?"#FFFBEB" : v.alertaEnviada?"#FEF3C7" : i%2===0?"#fff":C.surf2,
+                            cursor:"pointer"}}
+                          onClick={()=>startEdit(v)}>
+                          <td style={{padding:"6px 10px",fontFamily:"monospace",color:C.txt3,fontWeight:600}}>
+                            {v.nVale||"V-"+String(v.id).padStart(6,"0")}
+                            {v._corregido&&<span title="Editado" style={{marginLeft:4,fontSize:10,color:"#92400E"}}>✏</span>}
+                          </td>
+                          <td style={{padding:"6px 10px",fontFamily:"monospace",whiteSpace:"nowrap"}}>{v.fecha} {v.hora}</td>
+                          <td style={{padding:"6px 10px",fontWeight:600,maxWidth:160,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{v.equipoDen}</td>
+                          <td style={{padding:"6px 10px"}}><span style={{fontSize:9,fontWeight:700,padding:"1px 6px",borderRadius:4,background:"#F3F4F6",color:C.txt2}}>{v.tipo||"—"}</span></td>
+                          <td style={{padding:"6px 10px",fontFamily:"monospace",color:C.txt3}}>{v.placa||"—"}</td>
+                          <td style={{padding:"6px 10px"}}>{v.fundo||"—"}</td>
+                          <td style={{padding:"6px 10px"}}>
+                            {v.cultivo?<span style={{fontSize:9,fontWeight:600,background:"#DCFCE7",color:"#166534",padding:"2px 6px",borderRadius:10}}>🌱 {v.cultivo}</span>:<span style={{color:C.txt3,fontSize:10}}>—</span>}
+                          </td>
+                          <td style={{padding:"6px 10px",color:C.txt3,maxWidth:140,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{v.actividad||"—"}</td>
+                          <td style={{padding:"6px 10px",fontSize:10}}>{v.producto||"—"}</td>
+                          <td style={{padding:"6px 10px",fontFamily:"monospace",color:C.blue,fontWeight:700,textAlign:"right"}}>{v.gl?.toFixed(1)} gl</td>
+                          <td style={{padding:"6px 10px",fontFamily:"monospace",color:C.txt3,textAlign:"right"}}>{v.km||"—"}</td>
+                          <td style={{padding:"6px 10px",fontWeight:600}}>{v.chofer||"—"}</td>
+                          <td style={{padding:"6px 10px",color:C.txt3,fontSize:10}}>{v.almacenero||"—"}</td>
+                          <td style={{padding:"6px 8px",textAlign:"center",fontSize:14}}
+                            title={v.candadoOk===true?"Candado OK":v.candadoOk===false?"⚠ Incidente":"Sin verif."}>
+                            {v.candadoOk===true?"🔒":v.candadoOk===false?"🔓⚠":"—"}
+                          </td>
+                          <td style={{padding:"6px 10px",whiteSpace:"nowrap"}}>
+                            {v.aprobado?<span style={{color:C.ok,fontSize:10,fontWeight:700}}>✅ Aprobado</span>
+                              :v.rechazado?<span style={{color:C.crit,fontSize:10,fontWeight:700}}>✕ Rechazado</span>
+                              :<span style={{color:C.warn,fontSize:10,fontWeight:700}}>⏳ Pendiente</span>}
+                            {v.aprobadoPor && <div style={{fontSize:9,color:C.txt3,marginTop:2}}>por {v.aprobadoPor}</div>}
+                          </td>
+                          <td style={{padding:"6px 10px",whiteSpace:"nowrap"}}>
+                            <button onClick={e=>{e.stopPropagation();startEdit(v);}}
+                              style={{padding:"3px 9px",fontSize:10,background:RED,color:"#fff",border:"none",borderRadius:5,cursor:"pointer",fontFamily:"inherit",fontWeight:600}}>✏ Editar</button>
+                            {v.fotoMedidor && (
+                              <button onClick={e=>{e.stopPropagation();verImagenAmpliada(v.fotoMedidor);}}
+                                title="Ver foto medidor"
+                                style={{marginLeft:4,padding:"3px 7px",fontSize:10,background:"#F3F4F6",color:C.txt2,border:`1px solid ${C.bdr}`,borderRadius:5,cursor:"pointer",fontFamily:"inherit"}}>📸</button>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                      {valesFiltrados.length===0 && (
+                        <tr><td colSpan={16} style={{textAlign:"center",padding:"40px 20px",color:C.txt3}}>
+                          {vales.length===0?"Sin vales registrados.":"Sin resultados para los filtros actuales."}
+                        </td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              {editId !== null && (()=>{
+                const v = vales.find(x=>x.id===editId);
+                if(!v) return null;
+                return(
+                  <div style={{position:"fixed",bottom:0,left:0,right:0,background:"#fff",
+                    borderTop:`3px solid ${RED}`,boxShadow:"0 -8px 24px rgba(0,0,0,.15)",
+                    padding:"16px 24px",zIndex:50,maxHeight:"60vh",overflowY:"auto"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                      <div>
+                        <div style={{fontSize:14,fontWeight:700,color:RED}}>✏ Editando: {v.nVale}</div>
+                        <div style={{fontSize:11,color:C.txt3}}>{v.equipoDen} · {v.fecha} {v.hora}</div>
+                      </div>
+                      <button onClick={()=>setEditId(null)} style={{padding:"5px 14px",fontSize:11,border:`1px solid ${C.bdr}`,borderRadius:7,background:C.surf2,cursor:"pointer",fontFamily:"inherit"}}>Cancelar</button>
+                    </div>
+                    <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:10}}>
                       <div><label style={{fontSize:10,color:C.txt3,display:"block",marginBottom:3}}>Galones</label><input type="number" step="0.1" value={editData.gl} onChange={e=>setEditData(d=>({...d,gl:e.target.value}))} style={inp}/></div>
                       <div><label style={{fontSize:10,color:C.txt3,display:"block",marginBottom:3}}>Km / Horómetro</label><input type="number" value={editData.km} onChange={e=>setEditData(d=>({...d,km:e.target.value}))} style={inp}/></div>
                       <div><label style={{fontSize:10,color:C.txt3,display:"block",marginBottom:3}}>Fundo</label><select value={editData.fundo} onChange={e=>setEditData(d=>({...d,fundo:e.target.value}))} style={{...inp,WebkitAppearance:"none"}}>{(maestros.fundos||[]).map(f=><option key={f} value={f}>{f}</option>)}</select></div>
+                      <div><label style={{fontSize:10,color:C.txt3,display:"block",marginBottom:3}}>Cultivo</label><select value={editData.cultivo||""} onChange={e=>setEditData(d=>({...d,cultivo:e.target.value}))} style={{...inp,WebkitAppearance:"none"}}><option value="">—</option>{(maestros.cultivos||[]).map(c=><option key={c} value={c}>{c}</option>)}</select></div>
                       <div><label style={{fontSize:10,color:C.txt3,display:"block",marginBottom:3}}>Actividad</label><select value={editData.actividad} onChange={e=>setEditData(d=>({...d,actividad:e.target.value}))} style={{...inp,WebkitAppearance:"none"}}>{(maestros.actividades||[]).map(a=><option key={a.nombre||a} value={a.nombre||a}>{a.nombre||a}</option>)}</select></div>
                       <div><label style={{fontSize:10,color:C.txt3,display:"block",marginBottom:3}}>Chofer</label><input value={editData.chofer} onChange={e=>setEditData(d=>({...d,chofer:e.target.value}))} style={inp}/></div>
                       <div><label style={{fontSize:10,color:C.txt3,display:"block",marginBottom:3}}>Observaciones</label><input value={editData.obs} onChange={e=>setEditData(d=>({...d,obs:e.target.value}))} style={inp}/></div>
                     </div>
-                    <div style={{marginBottom:10}}><label style={{fontSize:11,fontWeight:700,color:RED,display:"block",marginBottom:4}}>* Motivo de la corrección (obligatorio)</label><textarea value={editMotivo} onChange={e=>setEditMotivo(e.target.value)} placeholder="Ej: Horómetro ingresado incorrectamente." style={{...inp,minHeight:52,resize:"vertical"}}/></div>
-                    <button onClick={saveEdit} style={{padding:"9px 20px",background:RED,color:"#fff",border:"none",borderRadius:8,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>✓ Guardar corrección con log</button>
+                    <div style={{marginBottom:10}}>
+                      <label style={{fontSize:11,fontWeight:700,color:RED,display:"block",marginBottom:4}}>* Motivo de la corrección (obligatorio)</label>
+                      <textarea value={editMotivo} onChange={e=>setEditMotivo(e.target.value)} placeholder="Ej: Horómetro ingresado incorrectamente." style={{...inp,minHeight:48,resize:"vertical"}}/>
+                    </div>
+                    <button onClick={saveEdit} style={{padding:"10px 24px",background:RED,color:"#fff",border:"none",borderRadius:8,fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>✓ Guardar corrección con log</button>
                   </div>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
+                );
+              })()}
+            </div>
+          );
+        })()}
         {view==="log"&&(
           <div>
             <div style={{marginBottom:12,display:"flex",alignItems:"center",gap:12}}>
@@ -2785,75 +3171,121 @@ function AppGerente({user,onLogout,vales,setVales,users,setUsers,maestros:maestr
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
             
             <div style={{background:C.surf,border:`1px solid ${C.bdr}`,borderRadius:12,padding:16}}>
-              <div style={{fontSize:13,fontWeight:700,marginBottom:14}}>👥 Usuarios del sistema</div>
-              {(users||[]).map((u,i)=>(
-                <div key={u.id} style={{border:`1px solid ${u.activo?C.bdr:"#FCA5A5"}`,borderRadius:10,
-                  padding:"10px 12px",marginBottom:8,background:u.activo?"#fff":"#FFF5F5",
-                  opacity:u.activo?1:.75}}>
-                  {editUser?.id===u.id?(
-                    /* Formulario edición inline */
-                    <div>
-                      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:6}}>
-                        {[["nombre","Nombre"],["usuario","Usuario"],["pass","Nueva contraseña"]].map(([k,l])=>(
-                          <div key={k}>
-                            <label style={{fontSize:9,color:C.txt3,display:"block",marginBottom:2,textTransform:"uppercase"}}>{l}</label>
-                            <input value={editUser[k]||""} onChange={e=>setEditUser(eu=>({...eu,[k]:e.target.value}))}
-                              placeholder={k==="pass"?"(sin cambio)":""}
-                              style={{width:"100%",padding:"5px 8px",border:`1.5px solid ${C.blue}`,borderRadius:6,fontSize:11,fontFamily:"inherit",outline:"none"}}/>
-                          </div>
-                        ))}
-                        <div>
-                          <label style={{fontSize:9,color:C.txt3,display:"block",marginBottom:2,textTransform:"uppercase"}}>Rol</label>
-                          <select value={editUser.rol} onChange={e=>setEditUser(eu=>({...eu,rol:e.target.value}))}
-                            style={{width:"100%",padding:"5px 8px",border:`1.5px solid ${C.blue}`,borderRadius:6,fontSize:11,fontFamily:"inherit",WebkitAppearance:"none"}}>
-                            {[["alm","Almacenero"],["plan","Planner"],["apro","Aprobador"],["ger","Gerente"]].map(([v,l])=><option key={v} value={v}>{l}</option>)}
-                          </select>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
+                <div style={{fontSize:13,fontWeight:700}}>👥 Usuarios del sistema</div>
+                <div style={{fontSize:10,color:C.txt3,fontStyle:"italic"}}>Agrupado por rol · Use ↑↓ para reordenar</div>
+              </div>
+              {(()=>{
+                const ROLES_ORDEN = [
+                  ["ger",  "🏢 Gerentes",    "#7C2D12"],
+                  ["plan", "📊 Planners",    "#1E3A8A"],
+                  ["apro", "✅ Aprobadores", "#92400E"],
+                  ["alm",  "🧑‍🔧 Almaceneros","#166534"],
+                ];
+                const moverUsuario = async (userId, direccion) => {
+                  const arr = [...(users||[])];
+                  const idx = arr.findIndex(u=>u.id===userId);
+                  if(idx<0) return;
+                  const rol = arr[idx].rol;
+                  let target = -1;
+                  if(direccion==="up"){
+                    for(let i=idx-1;i>=0;i--) if(arr[i].rol===rol){target=i;break;}
+                  }else{
+                    for(let i=idx+1;i<arr.length;i++) if(arr[i].rol===rol){target=i;break;}
+                  }
+                  if(target<0) return;
+                  [arr[idx], arr[target]] = [arr[target], arr[idx]];
+                  await setUsers(arr);
+                };
+                return ROLES_ORDEN.map(([rolKey, rolLabel, rolColor])=>{
+                  const grupo = (users||[]).filter(u=>u.rol===rolKey);
+                  if(grupo.length===0) return null;
+                  return(
+                    <div key={rolKey} style={{marginBottom:14}}>
+                      <div style={{fontSize:10,fontWeight:700,color:rolColor,
+                        textTransform:"uppercase",letterSpacing:.5,marginBottom:6,
+                        paddingBottom:4,borderBottom:`2px solid ${rolColor}`}}>
+                        {rolLabel} <span style={{background:rolColor,color:"#fff",padding:"1px 7px",borderRadius:10,fontSize:9,marginLeft:4}}>{grupo.length}</span>
+                      </div>
+                      {grupo.map((u,gi)=>(
+                        <div key={u.id} style={{border:`1px solid ${u.activo?C.bdr:"#FCA5A5"}`,borderRadius:10,
+                          padding:"10px 12px",marginBottom:6,background:u.activo?"#fff":"#FFF5F5",
+                          opacity:u.activo?1:.75}}>
+                          {editUser?.id===u.id?(
+                            /* Formulario edición inline */
+                            <div>
+                              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:6}}>
+                                {[["nombre","Nombre"],["usuario","Usuario"],["pass","Nueva contraseña"]].map(([k,l])=>(
+                                  <div key={k}>
+                                    <label style={{fontSize:9,color:C.txt3,display:"block",marginBottom:2,textTransform:"uppercase"}}>{l}</label>
+                                    <input value={editUser[k]||""} onChange={e=>setEditUser(eu=>({...eu,[k]:e.target.value}))}
+                                      placeholder={k==="pass"?"(sin cambio)":""}
+                                      style={{width:"100%",padding:"5px 8px",border:`1.5px solid ${C.blue}`,borderRadius:6,fontSize:11,fontFamily:"inherit",outline:"none"}}/>
+                                  </div>
+                                ))}
+                                <div>
+                                  <label style={{fontSize:9,color:C.txt3,display:"block",marginBottom:2,textTransform:"uppercase"}}>Rol</label>
+                                  <select value={editUser.rol} onChange={e=>setEditUser(eu=>({...eu,rol:e.target.value}))}
+                                    style={{width:"100%",padding:"5px 8px",border:`1.5px solid ${C.blue}`,borderRadius:6,fontSize:11,fontFamily:"inherit",WebkitAppearance:"none"}}>
+                                    {[["alm","Almacenero"],["plan","Planner"],["apro","Aprobador"],["ger","Gerente"]].map(([v,l])=><option key={v} value={v}>{l}</option>)}
+                                  </select>
+                                </div>
+                              </div>
+                              {editUser.rol==="apro"&&(
+                                <div style={{marginBottom:6}}>
+                                  <label style={{fontSize:9,color:C.txt3,display:"block",marginBottom:3,textTransform:"uppercase"}}>Cultivos</label>
+                                  <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                                    {["ESPARRAGO","ARANDANO","PIMIENTO","PALTA","PALTO","ALCACHOFA","OTROS"].map(c=>{
+                                      const sel=(editUser.cultivos||[]).includes(c);
+                                      return(<button key={c} onClick={()=>setEditUser(eu=>({...eu,cultivos:sel?(eu.cultivos||[]).filter(x=>x!==c):[...(eu.cultivos||[]),c]}))}
+                                        style={{padding:"2px 7px",borderRadius:10,fontSize:10,fontWeight:600,border:`1px solid ${sel?C.blue:C.bdr}`,background:sel?"#EFF6FF":"#fff",color:sel?C.blue:C.txt3,cursor:"pointer",fontFamily:"inherit"}}>{c}</button>);
+                                    })}
+                                  </div>
+                                </div>
+                              )}
+                              <div style={{display:"flex",gap:6,marginTop:4}}>
+                                <button onClick={async()=>{
+                                    const upd=(users||[]).map(x=>x.id===editUser.id?{...x,...editUser,...(editUser.pass?{pass:editUser.pass}:{})}:x);
+                                    await setUsers(upd);setEditUser(null);setToast({msg:"✓ Usuario actualizado",type:"ok"});
+                                  }}
+                                  style={{flex:1,padding:"6px",background:C.ok,color:"#fff",border:"none",borderRadius:7,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>✓ Guardar</button>
+                                <button onClick={()=>setEditUser(null)}
+                                  style={{padding:"6px 12px",background:C.surf2,color:C.txt2,border:`1px solid ${C.bdr}`,borderRadius:7,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>Cancelar</button>
+                              </div>
+                            </div>
+                          ):(
+                            <div style={{display:"flex",alignItems:"center",gap:8}}>
+                              <div style={{display:"flex",flexDirection:"column",gap:2}}>
+                                <button onClick={()=>moverUsuario(u.id,"up")} disabled={gi===0}
+                                  title="Subir" style={{fontSize:9,padding:"1px 4px",lineHeight:1,
+                                  background:gi===0?"#F3F4F6":"#fff",color:gi===0?C.txt3:C.txt2,
+                                  border:`1px solid ${C.bdr}`,borderRadius:3,cursor:gi===0?"not-allowed":"pointer",fontFamily:"inherit"}}>▲</button>
+                                <button onClick={()=>moverUsuario(u.id,"down")} disabled={gi===grupo.length-1}
+                                  title="Bajar" style={{fontSize:9,padding:"1px 4px",lineHeight:1,
+                                  background:gi===grupo.length-1?"#F3F4F6":"#fff",color:gi===grupo.length-1?C.txt3:C.txt2,
+                                  border:`1px solid ${C.bdr}`,borderRadius:3,cursor:gi===grupo.length-1?"not-allowed":"pointer",fontFamily:"inherit"}}>▼</button>
+                              </div>
+                              <div style={{flex:1}}>
+                                <div style={{fontWeight:600,fontSize:12}}>{u.nombre}</div>
+                                <div style={{fontSize:10,color:C.txt3,fontFamily:"monospace"}}>{u.usuario}{(u.cultivos||[]).length>0&&` · ${u.cultivos.join(", ")}`}</div>
+                              </div>
+                              <Badge type={u.activo?"ok":"warn"}>{u.activo?"Activo":"Inactivo"}</Badge>
+                              <div style={{display:"flex",gap:4}}>
+                                <button onClick={()=>setEditUser({...u,pass:""})}
+                                  style={{fontSize:10,padding:"3px 8px",borderRadius:5,background:C.blue,color:"#fff",border:"none",cursor:"pointer",fontFamily:"inherit"}}>✎</button>
+                                <button onClick={async()=>{const upd=(users||[]).map(x=>x.id===u.id?{...x,activo:!x.activo}:x);await setUsers(upd);}}
+                                  style={{fontSize:10,padding:"3px 8px",borderRadius:5,border:`1px solid ${C.bdr}`,background:u.activo?"#FEF2F2":"#F0FDF4",color:u.activo?C.crit:C.ok,cursor:"pointer",fontFamily:"inherit"}}>
+                                  {u.activo?"Baja":"Alta"}
+                                </button>
+                              </div>
+                            </div>
+                          )}
                         </div>
-                      </div>
-                      {editUser.rol==="apro"&&(
-                        <div style={{marginBottom:6}}>
-                          <label style={{fontSize:9,color:C.txt3,display:"block",marginBottom:3,textTransform:"uppercase"}}>Cultivos</label>
-                          <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
-                            {["ESPARRAGO","ARANDANO","PIMIENTO","PALTA","PALTO","ALCACHOFA","OTROS"].map(c=>{
-                              const sel=(editUser.cultivos||[]).includes(c);
-                              return(<button key={c} onClick={()=>setEditUser(eu=>({...eu,cultivos:sel?(eu.cultivos||[]).filter(x=>x!==c):[...(eu.cultivos||[]),c]}))}
-                                style={{padding:"2px 7px",borderRadius:10,fontSize:10,fontWeight:600,border:`1px solid ${sel?C.blue:C.bdr}`,background:sel?"#EFF6FF":"#fff",color:sel?C.blue:C.txt3,cursor:"pointer",fontFamily:"inherit"}}>{c}</button>);
-                            })}
-                          </div>
-                        </div>
-                      )}
-                      <div style={{display:"flex",gap:6,marginTop:4}}>
-                        <button onClick={async()=>{
-                            const upd=(users||[]).map(x=>x.id===editUser.id?{...x,...editUser,...(editUser.pass?{pass:editUser.pass}:{})}:x);
-                            await setUsers(upd);setEditUser(null);setToast({msg:"✓ Usuario actualizado",type:"ok"});
-                          }}
-                          style={{flex:1,padding:"6px",background:C.ok,color:"#fff",border:"none",borderRadius:7,fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>✓ Guardar</button>
-                        <button onClick={()=>setEditUser(null)}
-                          style={{padding:"6px 12px",background:C.surf2,color:C.txt2,border:`1px solid ${C.bdr}`,borderRadius:7,fontSize:11,cursor:"pointer",fontFamily:"inherit"}}>Cancelar</button>
-                      </div>
+                      ))}
                     </div>
-                  ):(
-                    <div style={{display:"flex",alignItems:"center",gap:8}}>
-                      <div style={{flex:1}}>
-                        <div style={{fontWeight:600,fontSize:12}}>{u.nombre}</div>
-                        <div style={{fontSize:10,color:C.txt3,fontFamily:"monospace"}}>{u.usuario}{(u.cultivos||[]).length>0&&` · ${u.cultivos.join(", ")}`}</div>
-                      </div>
-                      <Badge type={u.rol==="plan"?"exc":u.rol==="apro"?"warn":u.rol==="ger"?"def_":"ok"}>
-                        {u.rol==="plan"?"Planner":u.rol==="apro"?"Aprobador":u.rol==="ger"?"Gerente":"Almacenero"}
-                      </Badge>
-                      <Badge type={u.activo?"ok":"warn"}>{u.activo?"Activo":"Inactivo"}</Badge>
-                      <div style={{display:"flex",gap:4}}>
-                        <button onClick={()=>setEditUser({...u,pass:""})}
-                          style={{fontSize:10,padding:"3px 8px",borderRadius:5,background:C.blue,color:"#fff",border:"none",cursor:"pointer",fontFamily:"inherit"}}>✎</button>
-                        <button onClick={async()=>{const upd=(users||[]).map(x=>x.id===u.id?{...x,activo:!x.activo}:x);await setUsers(upd);}}
-                          style={{fontSize:10,padding:"3px 8px",borderRadius:5,border:`1px solid ${C.bdr}`,background:u.activo?"#FEF2F2":"#F0FDF4",color:u.activo?C.crit:C.ok,cursor:"pointer",fontFamily:"inherit"}}>
-                          {u.activo?"Baja":"Alta"}
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ))}
+                  );
+                });
+              })()}
             </div>
             
             <div style={{background:C.surf,border:`1px solid ${C.bdr}`,borderRadius:12,padding:16}}>
@@ -2941,7 +3373,14 @@ export default function App(){
 
       // Escuchar vales en tiempo real
       unsubVales = escuchar("vales", (datos)=>{
-        if(datos) setValesState(datos.sort((a,b)=>(a.id||0)-(b.id||0)));
+        if(datos) setValesState(datos.sort((a,b)=>{
+          // Orden cronológico: más reciente primero, usando fecha+hora
+          const fa = (a.fecha||"")+" "+(a.hora||"");
+          const fb = (b.fecha||"")+" "+(b.hora||"");
+          if(fa!==fb) return fb.localeCompare(fa);
+          // Si fecha+hora son iguales, usar id como desempate (id mayor = más reciente)
+          return (b.id||0)-(a.id||0);
+        }));
       });
 
       // Escuchar config en tiempo real (usuarios y maestros)
@@ -2989,6 +3428,24 @@ export default function App(){
     try{ await guardarUsuarios(u); }catch(e){ console.warn(e); }
   },[]);
 
+  // Recarga manual desde Firestore. Los listeners ya hacen sync en tiempo real,
+  // pero este botón ayuda si la pestaña estuvo en background o hubo error de red.
+  const recargarDatos = useCallback(async()=>{
+    const [valesData, m, u] = await Promise.all([
+      obtenerTodos("vales"),
+      obtenerMaestros(),
+      obtenerUsuarios(),
+    ]);
+    if(valesData) setValesState(valesData.sort((a,b)=>{
+      const fa = (a.fecha||"")+" "+(a.hora||"");
+      const fb = (b.fecha||"")+" "+(b.hora||"");
+      if(fa!==fb) return fb.localeCompare(fa);
+      return (b.id||0)-(a.id||0);
+    }));
+    if(m && Object.keys(m).length>0) setMaestrosState(m);
+    if(u && u.length>0) setUsersState(u);
+  },[]);
+
   if(cargando) return(
     <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",
       background:"linear-gradient(145deg,#1a0305,#0B1628)",flexDirection:"column",gap:16}}>
@@ -3010,8 +3467,9 @@ export default function App(){
   if(currentUser.rol==="ger")
     return <AppGerente user={currentUser} onLogout={()=>setCurrentUser(null)}
       vales={vales} setVales={setVales} users={users} setUsers={setUsers}
-      maestros={maestros}/>;
+      maestros={maestros} recargarDatos={recargarDatos}/>;
   return <DashboardPlanner user={currentUser} onLogout={()=>setCurrentUser(null)}
     maestros={maestros} setMaestros={setMaestros}
-    vales={vales} users={users} setUsers={setUsers}/>;
+    vales={vales} users={users} setUsers={setUsers}
+    recargarDatos={recargarDatos}/>;
 }
