@@ -1,7 +1,7 @@
 /* eslint-disable */
 import { useState, useEffect, useCallback, useRef } from "react";
 import * as XLSX from "xlsx";
-import { guardar, obtenerTodos, escuchar, guardarMaestros, obtenerMaestros, guardarUsuarios, obtenerUsuarios, guardarCounter, obtenerCounter, reservarSiguienteVale } from "./firebase";
+import { guardar, obtenerTodos, escuchar, guardarMaestros, obtenerMaestros, guardarUsuarios, obtenerUsuarios, guardarCounter, obtenerCounter, reservarSiguienteVale, liberarVale } from "./firebase";
 // Constantes, paletas, componentes UI simples y funciones puras extraídas a helpers.js
 import {
   CSS_GLOBAL, CSS_DRAWER, CSS_DASH,
@@ -13,6 +13,48 @@ import {
   actividadesPorTipo, getRatio, buildUnified,
   Badge, KCard, Toast,
 } from "./helpers";
+
+// ─── HELPERS DE GUARDADO SEGURO ──────────────────────────────────────────────
+
+// Comprime una imagen data URL para que el documento Firestore no supere el
+// límite duro de 1 MB. Reduce a 900px máximo de lado mayor + calidad JPEG 0.7.
+// Una foto típica de celular (3-5 MB) baja a ~100-200 KB.
+function comprimirImagen(dataUrl, maxLado=900, calidad=0.7){
+  return new Promise((resolve,reject)=>{
+    if(!dataUrl){ resolve(null); return; }
+    const img = new Image();
+    img.onload = () => {
+      try{
+        let w = img.width, h = img.height;
+        if(w > maxLado || h > maxLado){
+          const r = w > h ? maxLado/w : maxLado/h;
+          w = Math.round(w*r); h = Math.round(h*r);
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = w; canvas.height = h;
+        canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL("image/jpeg", calidad));
+      }catch(e){ reject(e); }
+    };
+    img.onerror = reject;
+    img.src = dataUrl;
+  });
+}
+
+// Elimina recursivamente claves con valor undefined. Firestore rechaza el
+// documento completo si encuentra undefined en cualquier propiedad.
+function limpiarUndefined(v){
+  if(Array.isArray(v)) return v.map(limpiarUndefined);
+  if(v && typeof v==="object"){
+    const o={};
+    for(const [k,val] of Object.entries(v)){
+      if(val===undefined) continue;
+      o[k] = limpiarUndefined(val);
+    }
+    return o;
+  }
+  return v;
+}
 
 function Login({onLogin,users}){
   const [u,setU]=useState(""); const [p,setP]=useState(""); const [err,setErr]=useState("");
@@ -281,42 +323,46 @@ function AppAlmacenero({user,onLogout,maestros,vales,setVales}){
       setAlertaMsg(`${gl.toFixed(1)} gl supera el umbral estimado de ${(umbral*1.2).toFixed(1)} gl · Ratio teórico: ${teoLabel}`);
     }else setShowAlerta(false);
   },[gl,teoRatio,equipo]);
-  // Si cambia fundo o equipo, el candado debe verificarse de nuevo (es otro contexto)
-  useEffect(()=>{
-    if(candadoOk !== null){
-      setCandadoOk(null);
-      setIncidenteNota("");
-      setIncidenteFoto(null);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[form.fundo, form.equipoId]);
   const handleValeNumChange = async(n)=>{
     setValeNum(n);
     try{ await guardarCounter(n); }catch(e){ console.warn(e); }
   };
     const handleSubmit=async()=>{
-    // Validación de candado: bloqueo lógico real, no solo visual
+    // Validaciones
     if(candadoOk===null){
       setToast({msg:"Debe verificar el estado del candado antes de despachar",type:"err"});return;
     }
     if(!form.fundo||!form.equipoId||!form.actividad||!form.chofer){
       setToast({msg:"Complete todos los campos obligatorios (*)",type:"err"});return;
     }
+    if(!form.cultivo){
+      setToast({msg:"Seleccione el cultivo (obligatorio)",type:"err"});return;
+    }
     if(!form.producto){setToast({msg:"Seleccione un tipo de combustible",type:"err"});return;}
     if(gl<=0){setToast({msg:"Ingrese los galones despachados",type:"err"});return;}
 
-    // Reservar el siguiente N° de vale ATÓMICAMENTE desde Firestore.
-    // Esto evita que dos almaceneros generen el mismo número en paralelo.
+    // Reservar N° de vale ATÓMICAMENTE desde Firestore
     let numeroReservado;
     try{
       numeroReservado = await reservarSiguienteVale();
     }catch(e){
-      // Fallback: si la transacción falla por red, usar el contador local.
-      // El usuario verá un toast y podrá reintentar si hay colisión visible.
       console.warn("Fallo reservarSiguienteVale, usando contador local:",e);
       numeroReservado = valeNum;
     }
     setValeNum(numeroReservado + 1);
+
+    // COMPRIMIR FOTOS antes de guardar — Firestore tiene límite duro de 1 MB
+    // por documento. Sin esto, fotos del celular (3-5 MB) son rechazadas.
+    let fotoComprimida = fotoMedidor;
+    if(fotoMedidor){
+      try{ fotoComprimida = await comprimirImagen(fotoMedidor, 900, 0.7); }
+      catch(e){ console.warn("No se pudo comprimir foto medidor:",e); }
+    }
+    let incidenteFotoComp = incidenteFoto;
+    if(incidenteFoto){
+      try{ incidenteFotoComp = await comprimirImagen(incidenteFoto, 900, 0.7); }
+      catch(e){ console.warn("No se pudo comprimir foto incidente:",e); }
+    }
 
     const now=new Date();
     const vale={
@@ -327,40 +373,45 @@ function AppAlmacenero({user,onLogout,maestros,vales,setVales}){
       fundo:form.fundo,
       equipoId:form.equipoId,
       equipoDen:equipo?.den||"",
-      tipo:equipo?.tipo||tipoFiltro,
+      tipo:equipo?.tipo||tipoFiltro||"",
       placa:equipo?.placa||"",
       km:parseFloat(form.km)||0,
       actividad:form.actividad,
       cultivo:form.cultivo,
       producto:form.producto,
       gl,
-      teoRatio, teoUnit, actividadObj: actObj,
+      // SANEO: nunca undefined — Firestore rechaza doc completo si encuentra undefined
+      teoRatio: teoRatio||null,
+      teoUnit:  teoUnit||"Gl/Hr",
+      actividadObj: actObj||null,
       kmAnterior: ultimoKm||null,
       diferencia: (()=>{
         const kma=parseFloat(form.km)||0;
-        // Solo registrar diferencia si hay un km previo válido y el actual es mayor
         if(!ultimoKm || kma<=ultimoKm) return null;
         return kma-ultimoKm;
       })(),
-      obs:form.obs,
-      almacenero:form.almacenero,
+      obs:form.obs||"",
+      almacenero:form.almacenero||"",
       chofer:form.chofer,
-      registradoPor:user.nombre||user.usuario,
-      alertaEnviada:showAlerta,
-      fotoMedidor:fotoMedidor||null,
-      // Trazabilidad del candado de seguridad
+      registradoPor:user.nombre||user.usuario||"",
+      alertaEnviada:!!showAlerta,
+      fotoMedidor:fotoComprimida||null,
       candadoOk:candadoOk,
-      incidenteNota:candadoOk===false?incidenteNota:"",
-      incidenteFoto:candadoOk===false?incidenteFoto:null,
+      incidenteNota:candadoOk===false?(incidenteNota||""):"",
+      incidenteFoto:candadoOk===false?(incidenteFotoComp||null):null,
     };
     const nuevos=[...vales,vale];
-    // Si falla la escritura del vale en Firebase mostramos el error.
-    // El contador ya quedó reservado y avanzado en Firestore — no se reutiliza,
-    // pero esto es lo correcto: garantiza unicidad estricta del N° de vale.
     try{
       await setVales(nuevos);
     }catch(e){
-      setToast({msg:"Error al guardar el vale: "+(e?.message||"red sin conexión"),type:"err"});
+      // Rollback: liberar N° de vale para evitar huecos en la numeración
+      const liberado = await liberarVale(numeroReservado);
+      if(liberado){
+        setValeNum(numeroReservado);
+        setToast({msg:"❌ Error al guardar: "+(e?.message||"red")+". N° "+("V-"+String(numeroReservado).padStart(6,"0"))+" liberado, reintente.",type:"err"});
+      }else{
+        setToast({msg:"❌ Error al guardar el vale "+("V-"+String(numeroReservado).padStart(6,"0"))+": "+(e?.message||"red"),type:"err"});
+      }
       return;
     }
     setForm({fundo:"",equipoId:"",km:"",actividad:"",cultivo:"",almacenero:user.nombre||user.usuario,chofer:"",obs:"",producto:"",galones:""});
@@ -401,6 +452,76 @@ function AppAlmacenero({user,onLogout,maestros,vales,setVales}){
       <div style={{padding:14}}>
       {tab==="nuevo"?(
         <>
+          {/* VERIFICACIÓN DE CANDADO */}
+          {candadoOk===null&&(
+            <div style={{background:"#fff",border:`2px solid ${C.navy}`,borderRadius:14,
+              padding:20,marginBottom:16,boxShadow:"0 2px 12px rgba(0,0,0,.08)"}}>
+              <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
+                <span style={{fontSize:36}}>🔒</span>
+                <div>
+                  <div style={{fontSize:15,fontWeight:700,color:C.navy}}>Verificación de seguridad</div>
+                  <div style={{fontSize:12,color:C.txt3}}>Obligatoria antes de despachar combustible</div>
+                </div>
+              </div>
+              <div style={{fontSize:13,fontWeight:600,color:C.txt2,marginBottom:16,
+                background:"#F8FAFC",borderRadius:10,padding:14,border:`1px solid ${C.bdr}`}}>
+                ¿El tanque de combustible tiene la tapa y el candado en buen estado?
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                <button onClick={()=>setCandadoOk(true)}
+                  style={{padding:"16px 10px",borderRadius:12,border:"2px solid #16A34A",
+                    background:"#F0FDF4",color:"#166534",fontSize:13,fontWeight:700,
+                    cursor:"pointer",fontFamily:"inherit",display:"flex",
+                    flexDirection:"column",alignItems:"center",gap:6}}>
+                  <span style={{fontSize:32}}>✅</span>
+                  <div>Sí, todo correcto</div>
+                  <div style={{fontSize:10,fontWeight:400}}>Tapa y candado OK</div>
+                </button>
+                <button onClick={()=>setShowCandadoModal(true)}
+                  style={{padding:"16px 10px",borderRadius:12,border:"2px solid #DC2626",
+                    background:"#FEF2F2",color:"#991B1B",fontSize:13,fontWeight:700,
+                    cursor:"pointer",fontFamily:"inherit",display:"flex",
+                    flexDirection:"column",alignItems:"center",gap:6}}>
+                  <span style={{fontSize:32}}>⚠️</span>
+                  <div>No, hay problema</div>
+                  <div style={{fontSize:10,fontWeight:400}}>Reportar incidente</div>
+                </button>
+              </div>
+            </div>
+          )}
+          {candadoOk===true&&(
+            <div style={{background:"#F0FDF4",border:"1px solid #16A34A",borderRadius:10,
+              padding:"10px 14px",marginBottom:12,display:"flex",alignItems:"center",
+              justifyContent:"space-between"}}>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <span style={{fontSize:20}}>🔒✅</span>
+                <div style={{fontSize:12,fontWeight:700,color:"#166534"}}>Candado verificado — puede despachar</div>
+              </div>
+              <button onClick={()=>setCandadoOk(null)}
+                style={{fontSize:10,color:C.txt3,background:"none",border:`1px solid ${C.bdr}`,
+                  borderRadius:6,padding:"2px 8px",cursor:"pointer",fontFamily:"inherit"}}>
+                Cambiar
+              </button>
+            </div>
+          )}
+          {candadoOk===false&&(
+            <div style={{background:"#FEF2F2",border:"1px solid #DC2626",borderRadius:10,
+              padding:"10px 14px",marginBottom:12,display:"flex",alignItems:"center",
+              justifyContent:"space-between"}}>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <span style={{fontSize:20}}>⚠️</span>
+                <div>
+                  <div style={{fontSize:12,fontWeight:700,color:"#991B1B"}}>Incidente reportado</div>
+                  <div style={{fontSize:10,color:"#991B1B"}}>{incidenteNota||"Sin descripción"}</div>
+                </div>
+              </div>
+              <button onClick={()=>{setCandadoOk(null);setIncidenteNota("");setIncidenteFoto(null);}}
+                style={{fontSize:10,color:C.txt3,background:"none",border:`1px solid ${C.bdr}`,
+                  borderRadius:6,padding:"2px 8px",cursor:"pointer",fontFamily:"inherit"}}>
+                Cambiar
+              </button>
+            </div>
+          )}
           {/* Modal de incidente */}
           {showCandadoModal&&(
             <>
@@ -464,16 +585,34 @@ function AppAlmacenero({user,onLogout,maestros,vales,setVales}){
                     </div>
                   </div>
                   <button onClick={async()=>{
+                    // Comprimir foto del incidente para no superar el límite de 1 MB
+                    let fotoComp = incidenteFoto;
+                    if(incidenteFoto){
+                      try{ fotoComp = await comprimirImagen(incidenteFoto, 900, 0.7); }
+                      catch(e){ console.warn("No se pudo comprimir foto incidente:",e); }
+                    }
                     const inc={tipo:"CANDADO_PROBLEMA",
                       fecha:new Date().toISOString().slice(0,10),
                       hora:new Date().toLocaleTimeString("es-PE"),
-                      almacenero:user.nombre||user.usuario,
+                      almacenero:user.nombre||user.usuario||"",
+                      // Contexto del lugar/equipo donde se detectó el problema
+                      fundo: form.fundo || "—",
+                      equipoId: form.equipoId || "—",
+                      equipoDen: equipo?.den || "—",
+                      placa: equipo?.placa || "",
+                      tipoEquipo: equipo?.tipo || tipoFiltro || "—",
                       nota:incidenteNota||"Sin descripción",
-                      foto:incidenteFoto||null,
+                      foto:fotoComp||null,
+                      revisado:false,
                       timestamp:new Date().toISOString()};
-                    try{ await guardar("incidentes",Date.now().toString(),inc);
+                    try{
+                      await guardar("incidentes",Date.now().toString(),limpiarUndefined(inc));
                       setToast({msg:"⚠ Incidente reportado",type:"warn"});
-                    }catch(e){console.warn(e);}
+                    }catch(e){
+                      console.warn(e);
+                      setToast({msg:"Error al reportar incidente: "+e.message,type:"err"});
+                      return;
+                    }
                     setCandadoOk(false);
                     setShowCandadoModal(false);
                   }}
@@ -489,7 +628,10 @@ function AppAlmacenero({user,onLogout,maestros,vales,setVales}){
               </div>
             </>
           )}
-          <div>
+          {/* Bloquear formulario hasta verificar candado */}
+          <div style={{opacity:candadoOk===null?0.3:1,
+            pointerEvents:candadoOk===null?"none":"auto",
+            transition:"opacity .3s"}}>
           <div style={S.card}>
             <div style={S.sec}>1 · Tipo de equipo</div>
             <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:8}}>
@@ -584,7 +726,7 @@ function AppAlmacenero({user,onLogout,maestros,vales,setVales}){
             </div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
               <div>
-                <label style={S.lbl}>Cultivo</label>
+                <label style={S.lbl}>Cultivo <span style={{color:"red"}}>*</span></label>
                 <select style={sel} value={form.cultivo} onChange={e=>setForm(f=>({...f,cultivo:e.target.value}))}>
                   <option value="">— Seleccionar —</option>
                   {(maestros.cultivos||[]).map(c=><option key={c} value={c}>{c}</option>)}
@@ -598,85 +740,6 @@ function AppAlmacenero({user,onLogout,maestros,vales,setVales}){
           </div>
           <div style={S.card}>
             <div style={S.sec}>4 · Combustible</div>
-            {(!form.fundo || !form.equipoId) && candadoOk===null && (
-              <div style={{background:"#FEF3C7",border:"1px solid #F59E0B",borderRadius:10,
-                padding:"10px 14px",marginBottom:14,display:"flex",alignItems:"center",gap:10}}>
-                <span style={{fontSize:20}}>👉</span>
-                <div style={{fontSize:12,color:"#78350F"}}>
-                  Primero seleccione <b>fundo y equipo</b> arriba. Luego se le pedirá verificar el candado.
-                </div>
-              </div>
-            )}
-          {/* VERIFICACIÓN DE CANDADO */}
-          {form.fundo && form.equipoId && candadoOk===null&&(
-            <div style={{background:"#fff",border:`2px solid ${C.navy}`,borderRadius:14,
-              padding:20,marginBottom:16,boxShadow:"0 2px 12px rgba(0,0,0,.08)"}}>
-              <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
-                <span style={{fontSize:36}}>🔒</span>
-                <div>
-                  <div style={{fontSize:15,fontWeight:700,color:C.navy}}>Verificación de seguridad</div>
-                  <div style={{fontSize:12,color:C.txt3}}>Obligatoria antes de despachar combustible</div>
-                </div>
-              </div>
-              <div style={{fontSize:13,fontWeight:600,color:C.txt2,marginBottom:16,
-                background:"#F8FAFC",borderRadius:10,padding:14,border:`1px solid ${C.bdr}`}}>
-                ¿El tanque de combustible tiene la tapa y el candado en buen estado?
-              </div>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-                <button onClick={()=>setCandadoOk(true)}
-                  style={{padding:"16px 10px",borderRadius:12,border:"2px solid #16A34A",
-                    background:"#F0FDF4",color:"#166534",fontSize:13,fontWeight:700,
-                    cursor:"pointer",fontFamily:"inherit",display:"flex",
-                    flexDirection:"column",alignItems:"center",gap:6}}>
-                  <span style={{fontSize:32}}>✅</span>
-                  <div>Sí, todo correcto</div>
-                  <div style={{fontSize:10,fontWeight:400}}>Tapa y candado OK</div>
-                </button>
-                <button onClick={()=>setShowCandadoModal(true)}
-                  style={{padding:"16px 10px",borderRadius:12,border:"2px solid #DC2626",
-                    background:"#FEF2F2",color:"#991B1B",fontSize:13,fontWeight:700,
-                    cursor:"pointer",fontFamily:"inherit",display:"flex",
-                    flexDirection:"column",alignItems:"center",gap:6}}>
-                  <span style={{fontSize:32}}>⚠️</span>
-                  <div>No, hay problema</div>
-                  <div style={{fontSize:10,fontWeight:400}}>Reportar incidente</div>
-                </button>
-              </div>
-            </div>
-          )}
-          {candadoOk===true&&(
-            <div style={{background:"#F0FDF4",border:"1px solid #16A34A",borderRadius:10,
-              padding:"10px 14px",marginBottom:12,display:"flex",alignItems:"center",
-              justifyContent:"space-between"}}>
-              <div style={{display:"flex",alignItems:"center",gap:8}}>
-                <span style={{fontSize:20}}>🔒✅</span>
-                <div style={{fontSize:12,fontWeight:700,color:"#166534"}}>Candado verificado — puede despachar</div>
-              </div>
-              <button onClick={()=>setCandadoOk(null)}
-                style={{fontSize:10,color:C.txt3,background:"none",border:`1px solid ${C.bdr}`,
-                  borderRadius:6,padding:"2px 8px",cursor:"pointer",fontFamily:"inherit"}}>
-                Cambiar
-              </button>
-            </div>
-          )}
-          {candadoOk===false&&(
-            <div style={{background:"#FEF2F2",border:"1px solid #DC2626",borderRadius:10,
-              padding:"10px 14px",marginBottom:12,display:"flex",alignItems:"center",
-              justifyContent:"space-between"}}>
-              <div style={{display:"flex",alignItems:"center",gap:8}}>
-                <span style={{fontSize:20}}>⚠️</span>
-                <div>
-                  <div style={{fontSize:12,fontWeight:700,color:"#991B1B"}}>Incidente reportado</div>
-                  <div style={{fontSize:10,color:"#991B1B"}}>{incidenteNota||"Sin descripción"}</div>
-                </div>
-              </div>
-              <button onClick={()=>{setCandadoOk(null);setIncidenteNota("");setIncidenteFoto(null);}}
-                style={{fontSize:10,color:C.txt3,background:"none",border:`1px solid ${C.bdr}`,
-                  borderRadius:6,padding:"2px 8px",cursor:"pointer",fontFamily:"inherit"}}>
-                Cambiar
-              </button>
-            </div>
-          )}
             <div style={{marginBottom:10}}>
               <label style={S.lbl}>Tipo de combustible <span style={{color:"red"}}>*</span></label>
               <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:8}}>
@@ -2199,6 +2262,101 @@ function DashboardPlanner({user,onLogout,maestros,setMaestros,vales,users,setUse
             );
           })()}
           
+          {view==="incidentes"&&(()=>{
+            const incOrden = [...incidentes].sort((a,b)=>(b.timestamp||"").localeCompare(a.timestamp||""));
+            const sinRevisar = incOrden.filter(i=>!i.revisado);
+            const revisados  = incOrden.filter(i=>i.revisado);
+            const marcarRevisado = async(inc)=>{
+              try{
+                await guardar("incidentes", inc._fireId, limpiarUndefined({...inc, revisado:true, revisadoPor:user.nombre||user.usuario, revisadoEn:new Date().toISOString()}));
+                setToast({msg:"✓ Incidente marcado como revisado",type:"ok"});
+              }catch(e){ setToast({msg:"Error: "+e.message,type:"err"}); }
+            };
+            const IncidenteCard = ({inc, revisado=false}) => (
+              <div style={{background:revisado?"#F9FAFB":"#FEF2F2",border:`1px solid ${revisado?C.bdr:"#FCA5A5"}`,
+                borderRadius:10,padding:14,marginBottom:10}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:10,marginBottom:8}}>
+                  <div style={{flex:1}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4,flexWrap:"wrap"}}>
+                      <span style={{fontSize:18}}>{inc.tipo==="CANDADO_PROBLEMA"?"🔓":"⚠️"}</span>
+                      <span style={{fontSize:13,fontWeight:700,color:revisado?C.txt2:"#991B1B"}}>
+                        {inc.tipo==="CANDADO_PROBLEMA"?"Candado/tapa en mal estado":(inc.tipo||"Incidente")}
+                      </span>
+                      {revisado && <span style={{fontSize:9,fontWeight:700,color:C.ok,background:"#DCFCE7",borderRadius:8,padding:"2px 7px"}}>✓ REVISADO</span>}
+                    </div>
+                    <div style={{fontSize:11,color:C.txt3}}>
+                      📅 {inc.fecha} · ⏰ {inc.hora} · 👤 {inc.almacenero||"—"}
+                    </div>
+                    {(inc.fundo || inc.equipoDen) && (inc.fundo!=="—" || inc.equipoDen!=="—") && (
+                      <div style={{fontSize:11,color:C.txt2,marginTop:3,fontWeight:600}}>
+                        {inc.fundo && inc.fundo!=="—" && <>📍 {inc.fundo}</>}
+                        {inc.equipoDen && inc.equipoDen!=="—" && <> · 🚜 {inc.equipoDen}{inc.placa?` (${inc.placa})`:""}</>}
+                      </div>
+                    )}
+                    <div style={{fontSize:12,color:C.txt2,marginTop:6,padding:"6px 10px",background:revisado?"#fff":"rgba(255,255,255,.7)",borderRadius:6,border:`1px solid ${C.bdr}`}}>
+                      <span style={{fontWeight:600,fontSize:10,color:C.txt3,textTransform:"uppercase"}}>Descripción: </span>
+                      {inc.nota||"Sin descripción"}
+                    </div>
+                    {revisado && inc.revisadoPor && (
+                      <div style={{fontSize:10,color:C.txt3,marginTop:5,fontStyle:"italic"}}>
+                        Revisado por {inc.revisadoPor} el {inc.revisadoEn?new Date(inc.revisadoEn).toLocaleString("es-PE"):"—"}
+                      </div>
+                    )}
+                  </div>
+                  {!revisado && (
+                    <button onClick={()=>marcarRevisado(inc)}
+                      style={{padding:"6px 12px",background:C.ok,color:"#fff",border:"none",borderRadius:8,
+                        fontSize:11,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
+                      ✓ Marcar revisado
+                    </button>
+                  )}
+                </div>
+                {inc.foto && (
+                  <div style={{marginTop:8}}>
+                    <img src={inc.foto} alt="incidente"
+                      onClick={()=>{
+                        const w = window.open();
+                        if(w) w.document.write('<img src="'+inc.foto+'" style="max-width:100%"/>');
+                      }}
+                      style={{maxWidth:200,maxHeight:140,objectFit:"cover",borderRadius:6,
+                        border:`1px solid ${C.bdr}`,cursor:"zoom-in"}}/>
+                  </div>
+                )}
+              </div>
+            );
+            return(
+              <>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:14}}>
+                  <KCard label="Total incidentes" value={incidentes.length} sub="histórico"/>
+                  <KCard label="Sin revisar" value={sinRevisar.length} sub="requieren atención" color={C.crit} accent={C.crit}/>
+                  <KCard label="Revisados" value={revisados.length} sub="cerrados" color={C.ok} accent={C.ok}/>
+                </div>
+                {sinRevisar.length>0 && (
+                  <div style={{marginBottom:18}}>
+                    <div style={{fontSize:12,fontWeight:700,marginBottom:10,color:"#991B1B"}}>
+                      ⚠ Incidentes sin revisar ({sinRevisar.length})
+                    </div>
+                    {sinRevisar.map((inc,i)=><IncidenteCard key={inc._fireId||i} inc={inc}/>)}
+                  </div>
+                )}
+                {revisados.length>0 && (
+                  <div>
+                    <div style={{fontSize:12,fontWeight:700,marginBottom:10,color:C.txt3}}>
+                      ✓ Historial revisados ({revisados.length})
+                    </div>
+                    {revisados.map((inc,i)=><IncidenteCard key={inc._fireId||i} inc={inc} revisado/>)}
+                  </div>
+                )}
+                {incidentes.length===0 && (
+                  <div style={{textAlign:"center",padding:"60px 20px",color:C.txt3}}>
+                    <div style={{fontSize:48,marginBottom:12}}>🟢</div>
+                    <div style={{fontSize:14,fontWeight:600}}>No hay incidentes reportados</div>
+                  </div>
+                )}
+              </>
+            );
+          })()}
+
           {view==="usuarios"&&(
             <div style={{background:C.surf,border:`1px solid ${C.bdr}`,borderRadius:12,padding:16}}>
               <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
@@ -2992,9 +3150,10 @@ export default function App(){
     for(const v of nuevos){
       const ant=anteriores.find(a=>a.id===v.id);
       if(!ant||JSON.stringify(ant)!==JSON.stringify(v)){
-        // Propagar el primer error para que el caller (ej. handleSubmit) pueda
-        // manejar el fallo y abortar la actualización del contador.
-        await guardar("vales",String(v.id),v);
+        // Sanear undefined antes de enviar: Firestore rechaza el documento
+        // completo si encuentra cualquier campo undefined. Propagamos errores
+        // para que handleSubmit pueda hacer rollback del contador.
+        await guardar("vales",String(v.id),limpiarUndefined(v));
       }
     }
   },[]);

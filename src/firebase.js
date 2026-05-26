@@ -104,6 +104,28 @@ export async function reservarSiguienteVale() {
     const actual = snap.exists() ? (snap.data().valeNum || 1) : 1;
     const siguiente = actual + 1;
     tx.set(ref, { valeNum: siguiente, _updatedAt: new Date().toISOString() }, { merge: true });
-    return actual; // este es el número que el cliente usará
+    return actual;
   });
+}
+
+// Libera un número de vale previamente reservado, cuando el guardado falló.
+// Solo libera si nadie más reservó después (evita pisar reservas concurrentes).
+export async function liberarVale(numero) {
+  if (numero == null || numero < 1) return false;
+  const ref = doc(db, "config", "counter");
+  try {
+    return await runTransaction(db, async (tx) => {
+      const snap = await tx.get(ref);
+      if (!snap.exists()) return false;
+      const actual = snap.data().valeNum || 1;
+      if (actual === numero + 1) {
+        tx.set(ref, { valeNum: numero, _updatedAt: new Date().toISOString() }, { merge: true });
+        return true;
+      }
+      return false;
+    });
+  } catch (e) {
+    console.warn("Error al liberar vale", numero, e);
+    return false;
+  }
 }
