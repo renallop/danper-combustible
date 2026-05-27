@@ -32,8 +32,7 @@ function Login({onLogin,users}){
           
           <img src={LOGO_SRC} alt="Danper" style={{width:36,height:36,borderRadius:"50%",objectFit:"cover",flexShrink:0,border:"2px solid rgba(255,255,255,.25)"}}/>
           <div>
-            <div style={{color:"#fff",fontFamily:"Georgia,serif",fontSize:20,fontWeight:700,
-              fontStyle:"italic",letterSpacing:1}}>Danper</div>
+            <div style={{color:"#fff",fontSize:18,fontWeight:700,letterSpacing:.5}}>Danper</div>
             <div style={{color:"rgba(255,255,255,.8)",fontSize:10,letterSpacing:1.5,
               textTransform:"uppercase",marginTop:1}}>Trujillo S.A.C.</div>
           </div>
@@ -56,30 +55,20 @@ function Login({onLogin,users}){
         <div style={{display:"flex",gap:48,alignItems:"center",maxWidth:900,width:"100%",
           animation:"fadeUp .5s ease",position:"relative",zIndex:1}}>
           
-          {/* Panel izquierdo — logo Danper sobre fondo rojo */}
+          {/* Panel izquierdo — texto descriptivo sobre fondo rojo */}
           <div style={{flex:1,color:"#fff",display:"none",paddingLeft:20}} className="desktop-info">
-            {/* Logo grande Danper — SVG inline para fidelidad al original */}
-            <svg viewBox="0 0 320 100" style={{width:320,height:100,marginBottom:18,filter:"drop-shadow(0 4px 16px rgba(0,0,0,.2))"}} xmlns="http://www.w3.org/2000/svg">
-              <text x="160" y="76"
-                fontFamily="'Lucida Handwriting','Brush Script MT','Segoe Script',cursive"
-                fontSize="92"
-                fontStyle="italic"
-                fontWeight="700"
-                fill="#fff"
-                textAnchor="middle">Danper</text>
-            </svg>
-            <div style={{fontSize:24,fontWeight:600,lineHeight:1.2,marginBottom:14,opacity:.95}}>
+            <div style={{fontSize:42,fontWeight:700,lineHeight:1.1,marginBottom:14,letterSpacing:-.5}}>
               Bienvenido
             </div>
-            <div style={{fontSize:11,letterSpacing:2.5,
-              textTransform:"uppercase",opacity:.85,marginBottom:32}}>
+            <div style={{fontSize:13,letterSpacing:2.5,
+              textTransform:"uppercase",opacity:.9,marginBottom:32,fontWeight:600}}>
               Portal de Mantenimiento y Maquinaria
             </div>
-            <div style={{height:1,width:60,background:"rgba(255,255,255,.5)",marginBottom:24}}/>
-            <div style={{display:"flex",gap:18,flexWrap:"wrap"}}>
+            <div style={{height:2,width:60,background:"rgba(255,255,255,.6)",marginBottom:28}}/>
+            <div style={{display:"flex",flexDirection:"column",gap:12}}>
               {[["⛽","Control de vales"],["📊","Dashboard en tiempo real"],["✅","Aprobaciones por cultivo"]].map(([ico,txt])=>(
-                <div key={txt} style={{display:"flex",alignItems:"center",gap:7,fontSize:12,color:"rgba(255,255,255,.85)"}}>
-                  <span>{ico}</span>{txt}
+                <div key={txt} style={{display:"flex",alignItems:"center",gap:10,fontSize:13,color:"rgba(255,255,255,.9)"}}>
+                  <span style={{fontSize:18}}>{ico}</span>{txt}
                 </div>
               ))}
             </div>
