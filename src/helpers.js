@@ -146,12 +146,18 @@ const HIST_DEFICITS = [];
 // ─── FIREBASE STORAGE ────────────────────────────────────────────────────────
 // La persistencia se gestiona directamente desde el App root mediante los
 // helpers importados de './firebase' (guardar, escuchar, guardarMaestros, etc.)
+// Paleta corporativa Danper:
+//  - danper:    rojo principal (logo y CTAs)
+//  - danperHov: rojo oscuro para hover/active
+//  - navy:      azul oscuro corporativo (headers)
+//  - blue:      azul de enlaces y datos
 const C = {
-  navy:"#0B2748",blue:"#1D6FD8",bg:"#F0EEE9",surf:"#fff",surf2:"#F7F5F1",
-  bdr:"rgba(0,0,0,.08)",bdr2:"rgba(0,0,0,.14)",txt:"#111",txt2:"#555",txt3:"#999",
-  exc:"#6D28D9",excBg:"#EDE9FE",def_:"#0369A1",defBg:"#E0F2FE",
-  ok:"#166534",okBg:"#DCFCE7",warn:"#B45309",warnBg:"#FEF3C7",
-  crit:"#B91C1C",critBg:"#FEE2E2",
+  danper:"#C8102E", danperHov:"#A30D26", danperLight:"#FFE5E8",
+  navy:"#0B2748", blue:"#1D6FD8", bg:"#FAFAF8", surf:"#fff", surf2:"#F7F5F1",
+  bdr:"rgba(0,0,0,.08)", bdr2:"rgba(0,0,0,.14)", txt:"#111", txt2:"#555", txt3:"#999",
+  exc:"#6D28D9", excBg:"#EDE9FE", def_:"#0369A1", defBg:"#E0F2FE",
+  ok:"#166534", okBg:"#DCFCE7", warn:"#B45309", warnBg:"#FEF3C7",
+  crit:"#B91C1C", critBg:"#FEE2E2",
 };
 const S = {
   card: {background:C.surf,border:`1px solid ${C.bdr}`,borderRadius:12,padding:16,marginBottom:12,boxShadow:"0 1px 3px rgba(0,0,0,.06)"},

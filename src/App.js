@@ -237,6 +237,7 @@ function AppAlmacenero({user,onLogout,maestros,vales,setVales}){
   const [candadoOk,setCandadoOk]=useState(null);       // null=sin verificar, true=OK, false=problema
   const [showCandadoModal,setShowCandadoModal]=useState(false);
   const [incidenteFoto,setIncidenteFoto]=useState(null);
+  const [enviandoIncidente,setEnviandoIncidente]=useState(false);
   const [incidenteNota,setIncidenteNota]=useState("");
   const [incidenteEnviado,setIncidenteEnviado]=useState(false);
   const [tipoFiltro,setTipoFiltro]=useState("");
@@ -480,40 +481,49 @@ function AppAlmacenero({user,onLogout,maestros,vales,setVales}){
                       )}
                     </div>
                   </div>
-                  <button onClick={async()=>{
-                    let fotoComp = incidenteFoto;
-                    if(incidenteFoto){
-                      try{ fotoComp = await comprimirImagen(incidenteFoto, 900, 0.7); }
-                      catch(e){ console.warn("No se pudo comprimir foto:",e); }
-                    }
-                    const inc={tipo:"CANDADO_PROBLEMA",
-                      fecha:new Date().toISOString().slice(0,10),
-                      hora:new Date().toLocaleTimeString("es-PE"),
-                      almacenero:user.nombre||user.usuario||"",
-                      fundo: form.fundo || "—",
-                      equipoId: form.equipoId || "—",
-                      equipoDen: equipo?.den || "—",
-                      placa: equipo?.placa || "",
-                      tipoEquipo: equipo?.tipo || tipoFiltro || "—",
-                      nota:incidenteNota||"Sin descripción",
-                      foto:fotoComp||null,
-                      revisado:false,
-                      timestamp:new Date().toISOString()};
+                  <button
+                    disabled={enviandoIncidente}
+                    onClick={async()=>{
+                    // Guarda anti-doble-clic: evita que un tap rápido o un re-render
+                    // dispare la creación del incidente dos veces.
+                    if(enviandoIncidente) return;
+                    setEnviandoIncidente(true);
                     try{
+                      let fotoComp = incidenteFoto;
+                      if(incidenteFoto){
+                        try{ fotoComp = await comprimirImagen(incidenteFoto, 900, 0.7); }
+                        catch(e){ console.warn("No se pudo comprimir foto:",e); }
+                      }
+                      const inc={tipo:"CANDADO_PROBLEMA",
+                        fecha:new Date().toISOString().slice(0,10),
+                        hora:new Date().toLocaleTimeString("es-PE"),
+                        almacenero:user.nombre||user.usuario||"",
+                        fundo: form.fundo || "—",
+                        equipoId: form.equipoId || "—",
+                        equipoDen: equipo?.den || "—",
+                        placa: equipo?.placa || "",
+                        tipoEquipo: equipo?.tipo || tipoFiltro || "—",
+                        nota:incidenteNota||"Sin descripción",
+                        foto:fotoComp||null,
+                        revisado:false,
+                        timestamp:new Date().toISOString()};
                       await guardar("incidentes",Date.now().toString(),limpiarUndefined(inc));
                       setToast({msg:"⚠ Incidente reportado",type:"warn"});
+                      setCandadoOk(false);
+                      setShowCandadoModal(false);
                     }catch(e){
                       console.warn(e);
                       setToast({msg:"Error al reportar: "+e.message,type:"err"});
-                      return;
+                    }finally{
+                      setEnviandoIncidente(false);
                     }
-                    setCandadoOk(false);
-                    setShowCandadoModal(false);
                   }}
-                  style={{width:"100%",padding:"12px",background:"#DC2626",color:"#fff",
+                  style={{width:"100%",padding:"12px",
+                    background:enviandoIncidente?"#9CA3AF":"#DC2626",color:"#fff",
                     border:"none",borderRadius:10,fontSize:13,fontWeight:700,
-                    cursor:"pointer",fontFamily:"inherit"}}>
-                    ⚠️ Confirmar y reportar incidente
+                    cursor:enviandoIncidente?"wait":"pointer",fontFamily:"inherit",
+                    opacity:enviandoIncidente?.7:1}}>
+                    {enviandoIncidente?"Enviando...":"⚠️ Confirmar y reportar incidente"}
                   </button>
                   <div style={{fontSize:10,color:"#9CA3AF",textAlign:"center",marginTop:8}}>
                     Después de reportar podrás continuar con el despacho
@@ -920,7 +930,7 @@ function AppAlmacenero({user,onLogout,maestros,vales,setVales}){
                   {v.alertaEnviada&&<Badge type="warn">⚠ Alerta</Badge>}
                 </div>
                 <div style={{fontSize:12,color:C.txt2}}>
-                  <span style={{color:C.blue,fontWeight:700}}>{v.gl.toFixed(1)} gl</span>
+                  <span style={{color:C.blue,fontWeight:700}}>{(v.gl||0).toFixed(1)} gl</span>
                   {" "+v.producto+" · "}{v.chofer}{" · #"+String(v.id).padStart(6,"0")}
                 </div>
                 {v.fotoMedidor&&(
@@ -1184,8 +1194,8 @@ function MantChoferesCard({maestros, setMaestros, setToast}){
 function DrawerDetalle({drawer,setDrawer,drawerTab,setDrawerTab,vales,maestros}){
   if(!drawer)return null;
   const allD=buildUnified(vales);
-  const hist=allD.filter(r=>r.id===drawer.id).sort((a,b)=>a.fe.localeCompare(b.fe));
-  const appVales=vales.filter(v=>v.equipoId===drawer.id).sort((a,b)=>a.fecha.localeCompare(b.fecha));
+  const hist=allD.filter(r=>r.id===drawer.id).sort((a,b)=>(a.fe||"").localeCompare(b.fe||""));
+  const appVales=vales.filter(v=>v.equipoId===drawer.id).sort((a,b)=>(a.fecha||"").localeCompare(b.fecha||""));
   const totGl=hist.reduce((s,r)=>s+(r.gl_real||0),0);
   const excRows=hist.filter(r=>r.af==="exceso");
   const defRows=hist.filter(r=>r.af==="deficit");
@@ -1496,7 +1506,7 @@ function DashboardPlanner({user,onLogout,maestros,setMaestros,vales,users,setUse
   // Cargar incidentes desde Firebase
   useEffect(()=>{
     const unsub = escuchar("incidentes",(datos)=>{
-      setIncidentes(datos.sort((a,b)=>b.timestamp?.localeCompare(a.timestamp||"")));
+      setIncidentes(datos.sort((a,b)=>(b.timestamp||"").localeCompare(a.timestamp||"")));
     });
     return ()=>unsub();
   },[]);
@@ -1505,7 +1515,8 @@ function DashboardPlanner({user,onLogout,maestros,setMaestros,vales,users,setUse
   const [showGraf,setShowGraf]=useState(true);
   const [normPeriodo,setNormPeriodo]=useState("semana");
   const [normSort,setNormSort]=useState({col:"fe",dir:-1});
-  const [tFiltro,setTFiltro]=useState({tipo:"",fundo:"",cultivo:"",search:"",estado:""});
+  const [incMes,setIncMes]=useState(new Date().toISOString().slice(0,7));
+  const [tFiltro,setTFiltro]=useState({tipo:"",fundo:"",cultivo:"",search:"",estado:"",mes:new Date().toISOString().slice(0,7)});
   const [tSort,setTSort]=useState({col:"fecha",dir:-1});
   const [tHover,setTHover]=useState(null);
 
@@ -1851,7 +1862,7 @@ function DashboardPlanner({user,onLogout,maestros,setMaestros,vales,users,setUse
                   <select value={rFiltro.fundo} onChange={e=>setRFiltro(f=>({...f,fundo:e.target.value}))}
                     style={{fontSize:11,padding:"5px 10px",borderRadius:8,border:`1px solid ${C.bdr}`,fontFamily:"inherit",background:rFiltro.fundo?"#EFF6FF":C.surf2,WebkitAppearance:"none"}}>
                     <option value="">— Fundo —</option>
-                    {maestros.fundos.map(f=><option key={f} value={f}>{f}</option>)}
+                    {(maestros.fundos||[]).map(f=><option key={f} value={f}>{f}</option>)}
                   </select>
                   {(rFiltro.tipo||rFiltro.fundo||rFiltro.cultivo)&&(
                     <button onClick={()=>setRFiltro({tipo:"",fundo:"",cultivo:""})}
@@ -2105,7 +2116,7 @@ function DashboardPlanner({user,onLogout,maestros,setMaestros,vales,users,setUse
                 <select value={pfiltro.fundo} onChange={e=>setPfiltro(f=>({...f,fundo:e.target.value}))}
                   style={{fontSize:11,padding:"5px 8px",borderRadius:8,border:`1px solid ${C.bdr}`,fontFamily:"inherit",background:C.surf2,WebkitAppearance:"none"}}>
                   <option value="">— Fundo —</option>
-                  {maestros.fundos.map(f=><option key={f} value={f}>{f}</option>)}
+                  {(maestros.fundos||[]).map(f=><option key={f} value={f}>{f}</option>)}
                 </select>
                 <input placeholder="🔍 Buscar equipo..." value={pfiltro.search}
                   onChange={e=>setPfiltro(f=>({...f,search:e.target.value}))}
@@ -2159,7 +2170,7 @@ function DashboardPlanner({user,onLogout,maestros,setMaestros,vales,users,setUse
           
           {view==="eq_detalle"&&eqDetalle&&(()=>{
             const allD=buildUnified(vales);
-            const eqRows=allD.filter(r=>r.id===eqDetalle).sort((a,b)=>a.fe.localeCompare(b.fe));
+            const eqRows=allD.filter(r=>r.id===eqDetalle).sort((a,b)=>(a.fe||"").localeCompare(b.fe||""));
             const den=eqRows[0]?.ef||eqDetalle;
             const totGl=eqRows.reduce((s,r)=>s+(r.gl_real||0),0);
             const excR=eqRows.filter(r=>r.af==="exceso");
@@ -2216,6 +2227,12 @@ function DashboardPlanner({user,onLogout,maestros,setMaestros,vales,users,setUse
           
           {view==="todos"&&(()=>{
             const rows=vales.filter(v=>{
+              // Filtro por mes (YYYY-MM) — default mes actual. Reduce drásticamente
+              // la carga de fotos: en vez de bajar todas las fotos de todos los
+              // meses, solo carga el mes seleccionado.
+              if(tFiltro.mes && tFiltro.mes!=="todo"){
+                if(!(v.fecha||"").startsWith(tFiltro.mes)) return false;
+              }
               if(tFiltro.tipo&&v.tipo!==tFiltro.tipo)return false;
               if(tFiltro.fundo&&v.fundo!==tFiltro.fundo)return false;
               if(tFiltro.cultivo&&v.cultivo!==tFiltro.cultivo)return false;
@@ -2249,8 +2266,33 @@ function DashboardPlanner({user,onLogout,maestros,setMaestros,vales,users,setUse
                   <input placeholder="🔍 Buscar equipo, fundo, actividad..." value={tFiltro.search}
                     onChange={e=>setTFiltro(f=>({...f,search:e.target.value}))}
                     style={{padding:"6px 11px",borderRadius:8,border:`1px solid ${C.bdr}`,fontSize:11,fontFamily:"inherit",outline:"none",minWidth:200}}/>
+                  {/* Selector de mes — reduce drásticamente la carga de fotos */}
+                  {(()=>{
+                    // Generar opciones de mes a partir de los vales existentes
+                    const mesesSet = new Set(vales.map(v=>(v.fecha||"").slice(0,7)).filter(Boolean));
+                    const mesActual = new Date().toISOString().slice(0,7);
+                    mesesSet.add(mesActual);
+                    const meses = [...mesesSet].sort().reverse();
+                    const fmtMes = (m)=>{
+                      if(!m) return "";
+                      const [y,mo] = m.split("-");
+                      const nombres=["","Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
+                      return `${nombres[parseInt(mo,10)]} ${y}`;
+                    };
+                    return(
+                      <select value={tFiltro.mes} onChange={e=>setTFiltro(f=>({...f,mes:e.target.value}))}
+                        title="Filtrar por mes (reduce carga de fotos)"
+                        style={{fontSize:11,fontWeight:600,padding:"6px 10px",borderRadius:8,
+                          border:`1.5px solid ${C.danper}`,fontFamily:"inherit",
+                          background:tFiltro.mes==="todo"?"#FEE2E2":"#FFF5F6",
+                          color:tFiltro.mes==="todo"?"#B91C1C":C.danper,WebkitAppearance:"none"}}>
+                        {meses.map(m=><option key={m} value={m}>📅 {fmtMes(m)}</option>)}
+                        <option value="todo">⚠ Todo el histórico</option>
+                      </select>
+                    );
+                  })()}
                   {[["tipo","— Tipo —",[["TRACTOR","TRACTOR"],["CAMION","CAMIÓN"],["CISTERNA","CISTERNA"],["MONTACARGAS","MONTACARGAS"]]],
-                    ["fundo","— Fundo —",maestros.fundos.map(f=>[f,f])],
+                    ["fundo","— Fundo —",(maestros.fundos||[]).map(f=>[f,f])],
                     ["cultivo","— Cultivo —",(maestros.cultivos||[]).map(c=>[c,c])],
                     ["estado","— Estado —",[["aprobado","✅ Aprobado"],["rechazado","✕ Rechazado"],["pendiente","⏳ Pendiente"]]],
                   ].map(([k,ph,opts])=>(
@@ -2260,8 +2302,8 @@ function DashboardPlanner({user,onLogout,maestros,setMaestros,vales,users,setUse
                       {opts.map(([v,l])=><option key={v} value={v}>{l}</option>)}
                     </select>
                   ))}
-                  {Object.values(tFiltro).some(Boolean)&&(
-                    <button onClick={()=>setTFiltro({tipo:"",fundo:"",cultivo:"",search:"",estado:""})}
+                  {(tFiltro.tipo||tFiltro.fundo||tFiltro.cultivo||tFiltro.search||tFiltro.estado)&&(
+                    <button onClick={()=>setTFiltro(f=>({tipo:"",fundo:"",cultivo:"",search:"",estado:"",mes:f.mes}))}
                       style={{fontSize:10,padding:"4px 10px",borderRadius:20,background:"#FEE2E2",color:"#B91C1C",border:"none",cursor:"pointer",fontFamily:"inherit"}}>
                       ✕ Limpiar
                     </button>
@@ -2312,7 +2354,7 @@ function DashboardPlanner({user,onLogout,maestros,setMaestros,vales,users,setUse
                                   {v.cultivo?<span style={{fontSize:10,fontWeight:600,background:"#DCFCE7",color:"#166534",padding:"2px 7px",borderRadius:10}}>🌱 {v.cultivo}</span>:<span style={{color:C.txt3,fontSize:10}}>—</span>}
                                 </td>
                                 <td style={{padding:"7px 10px",color:C.txt3,maxWidth:140,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{v.actividad}</td>
-                                <td style={{padding:"7px 10px",fontFamily:"monospace",color:C.blue,fontWeight:700,textAlign:"right"}}>{v.gl.toFixed(1)} gl</td>
+                                <td style={{padding:"7px 10px",fontFamily:"monospace",color:C.blue,fontWeight:700,textAlign:"right"}}>{(v.gl||0).toFixed(1)} gl</td>
                                 <td style={{padding:"7px 10px",fontWeight:600}}>{v.chofer}</td>
                                 <td style={{padding:"7px 10px"}}>{v.aprobado?<span style={{color:C.ok,fontSize:11,fontWeight:700}}>✅ Aprobado</span>:v.rechazado?<span style={{color:C.crit,fontSize:11,fontWeight:700}}>✕ Rechazado</span>:<span style={{color:C.warn,fontSize:11,fontWeight:700}}>⏳ Pendiente</span>}</td>
                                 <td style={{padding:"7px 8px",textAlign:"center",fontSize:16}} title={v.candadoOk===true?"Candado OK":v.candadoOk===false?"⚠ Incidente reportado":"Sin verificar"}>
@@ -2323,6 +2365,7 @@ function DashboardPlanner({user,onLogout,maestros,setMaestros,vales,users,setUse
                                     ?<img
                                         src={v.fotoMedidor}
                                         alt="medidor"
+                                        loading="lazy"
                                         title="Clic para ampliar"
                                         onClick={e=>{e.stopPropagation();verImagenAmpliada(v.fotoMedidor);}}
                                         style={{height:40,width:56,objectFit:"cover",borderRadius:5,
@@ -2343,10 +2386,28 @@ function DashboardPlanner({user,onLogout,maestros,setMaestros,vales,users,setUse
           })()}
           
           {view==="incidentes"&&(()=>{
-            const incOrden = [...incidentes].sort((a,b)=>(b.timestamp||"").localeCompare(a.timestamp||""));
+            // Filtrar por mes (reduce carga de fotos del histórico)
+            const incFiltrados = (incMes && incMes!=="todo")
+              ? incidentes.filter(i => (i.fecha||"").startsWith(incMes))
+              : incidentes;
+            const incOrden = [...incFiltrados].sort((a,b)=>(b.timestamp||"").localeCompare(a.timestamp||""));
             const sinRevisar = incOrden.filter(i=>!i.revisado);
             const revisados  = incOrden.filter(i=>i.revisado);
+            // Opciones de mes a partir de los incidentes existentes
+            const mesesSet = new Set(incidentes.map(i=>(i.fecha||"").slice(0,7)).filter(Boolean));
+            mesesSet.add(new Date().toISOString().slice(0,7));
+            const meses = [...mesesSet].sort().reverse();
+            const fmtMes = (m)=>{
+              if(!m) return "";
+              const [y,mo]=m.split("-");
+              const nombres=["","Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"];
+              return `${nombres[parseInt(mo,10)]} ${y}`;
+            };
             const marcarRevisado = async(inc)=>{
+              if(!inc._fireId){
+                setToast({msg:"Error: incidente sin ID. Refresque la página.",type:"err"});
+                return;
+              }
               try{
                 await guardar("incidentes", inc._fireId, limpiarUndefined({...inc, revisado:true, revisadoPor:user.nombre||user.usuario, revisadoEn:new Date().toISOString()}));
                 setToast({msg:"✓ Incidente marcado como revisado",type:"ok"});
@@ -2394,6 +2455,7 @@ function DashboardPlanner({user,onLogout,maestros,setMaestros,vales,users,setUse
                 {inc.foto && (
                   <div style={{marginTop:8}}>
                     <img src={inc.foto} alt="incidente"
+                      loading="lazy"
                       onClick={()=>verImagenAmpliada(inc.foto)}
                       style={{maxWidth:200,maxHeight:140,objectFit:"cover",borderRadius:6,
                         border:`1px solid ${C.bdr}`,cursor:"zoom-in"}}/>
@@ -2403,8 +2465,24 @@ function DashboardPlanner({user,onLogout,maestros,setMaestros,vales,users,setUse
             );
             return(
               <>
+                {/* Selector de mes para limitar la carga */}
+                <div style={{background:C.surf,border:`1px solid ${C.bdr}`,borderRadius:10,
+                  padding:"10px 14px",marginBottom:12,display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+                  <span style={{fontSize:12,fontWeight:600,color:C.txt2}}>📅 Mes:</span>
+                  <select value={incMes} onChange={e=>setIncMes(e.target.value)}
+                    style={{fontSize:11,fontWeight:600,padding:"6px 12px",borderRadius:8,
+                      border:`1.5px solid ${C.danper}`,fontFamily:"inherit",
+                      background:incMes==="todo"?"#FEE2E2":"#FFF5F6",
+                      color:incMes==="todo"?"#B91C1C":C.danper,WebkitAppearance:"none"}}>
+                    {meses.map(m=><option key={m} value={m}>{fmtMes(m)}</option>)}
+                    <option value="todo">⚠ Todo el histórico</option>
+                  </select>
+                  <span style={{fontSize:10,color:C.txt3,marginLeft:"auto"}}>
+                    Mostrando {incOrden.length} de {incidentes.length} incidentes totales
+                  </span>
+                </div>
                 <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:14}}>
-                  <KCard label="Total incidentes" value={incidentes.length} sub="histórico"/>
+                  <KCard label="Total mes" value={incOrden.length} sub="filtrados"/>
                   <KCard label="Sin revisar" value={sinRevisar.length} sub="requieren atención" color={C.crit} accent={C.crit}/>
                   <KCard label="Revisados" value={revisados.length} sub="cerrados" color={C.ok} accent={C.ok}/>
                 </div>
@@ -2424,10 +2502,12 @@ function DashboardPlanner({user,onLogout,maestros,setMaestros,vales,users,setUse
                     {revisados.map((inc,i)=><IncidenteCard key={inc._fireId||i} inc={inc} revisado/>)}
                   </div>
                 )}
-                {incidentes.length===0 && (
+                {incOrden.length===0 && (
                   <div style={{textAlign:"center",padding:"60px 20px",color:C.txt3}}>
                     <div style={{fontSize:48,marginBottom:12}}>🟢</div>
-                    <div style={{fontSize:14,fontWeight:600}}>No hay incidentes reportados</div>
+                    <div style={{fontSize:14,fontWeight:600}}>
+                      {incidentes.length===0 ? "No hay incidentes reportados" : `No hay incidentes en ${fmtMes(incMes)}`}
+                    </div>
                   </div>
                 )}
               </>
@@ -2557,7 +2637,13 @@ function AppAprobador({user,onLogout,vales,setVales,users,precioPorGalon=18.5}){
   const RED="#C8102E";
   const misCultivos=user.cultivos||[];
   const misVales=vales.filter(v=>misCultivos.length===0||misCultivos.includes(v.cultivo))
-    .sort((a,b)=>new Date(b.fecha+"T"+b.hora)-new Date(a.fecha+"T"+a.hora));
+    .sort((a,b)=>{
+      // Sort cronológico descendente usando strings (estable, sin parseo de fecha)
+      const fa=(a.fecha||"")+" "+(a.hora||"");
+      const fb=(b.fecha||"")+" "+(b.hora||"");
+      if(fa!==fb) return fb.localeCompare(fa);
+      return (b.id||0)-(a.id||0);
+    });
   const dentro24h=(v)=>{
     try{
       let fh=v.fecha;
@@ -2797,7 +2883,7 @@ function GerMantActividadesCard({maestros,onGuardarMaestros,setToast}){
       setToast({msg:"Complete nombre, ratio y al menos un tipo",type:"err"}); return;
     }
     const arr=[...acts,{...newAct,ratio:parseFloat(newAct.ratio)||0}]
-      .sort((a,b)=>a.nombre.localeCompare(b.nombre));
+      .sort((a,b)=>(a.nombre||"").localeCompare(b.nombre||""));
     await save(arr);
     setNewAct({nombre:"",ratio:"",unit:"Gl/Hr",tipos:[]});
   };
@@ -2948,7 +3034,7 @@ function AppGerente({user,onLogout,vales,setVales,users,setUsers,maestros:maestr
     return ()=>unsub();
   },[]);
   const auditLog=vales.flatMap(v=>(v._log||[]).map(l=>({...l,valeId:v.id,nVale:v.nVale,equipo:v.equipoDen}))).sort((a,b)=>(b.ts||"").localeCompare(a.ts||""));
-  const startEdit=(v)=>{setEditId(v.id);setEditData({gl:v.gl,km:v.km,actividad:v.actividad,fundo:v.fundo,cultivo:v.cultivo,producto:v.producto,obs:v.obs||"",chofer:v.chofer});setEditMotivo("");};
+  const startEdit=(v)=>{setEditId(v.id);setEditData({gl:v.gl??0,km:v.km??0,actividad:v.actividad||"",fundo:v.fundo||"",cultivo:v.cultivo||"",producto:v.producto||"",obs:v.obs||"",chofer:v.chofer||""});setEditMotivo("");};
   const saveEdit=async()=>{
     if(!editMotivo.trim()){alert("Debe indicar el motivo de la corrección.");return;}
     const orig=vales.find(x=>x.id===editId)||{};
