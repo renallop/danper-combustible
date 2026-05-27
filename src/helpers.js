@@ -152,7 +152,7 @@ const HIST_DEFICITS = [];
 //  - navy:      azul oscuro corporativo (headers)
 //  - blue:      azul de enlaces y datos
 const C = {
-  danper:"#C8102E", danperHov:"#A30D26", danperLight:"#FFE5E8",
+  danper:"#E20613", danperHov:"#B30410", danperLight:"#FFE5E8",
   navy:"#0B2748", blue:"#1D6FD8", bg:"#FAFAF8", surf:"#fff", surf2:"#F7F5F1",
   bdr:"rgba(0,0,0,.08)", bdr2:"rgba(0,0,0,.14)", txt:"#111", txt2:"#555", txt3:"#999",
   exc:"#6D28D9", excBg:"#EDE9FE", def_:"#0369A1", defBg:"#E0F2FE",

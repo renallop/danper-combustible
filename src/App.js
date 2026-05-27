@@ -26,8 +26,8 @@ function Login({onLogin,users}){
     <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",fontFamily:"inherit"}}>
       <style>{CSS_GLOBAL}</style>
       
-      <div style={{background:"#C8102E",padding:"16px 32px",display:"flex",alignItems:"center",
-        justifyContent:"space-between",boxShadow:"0 2px 12px rgba(200,16,46,.3)"}}>
+      <div style={{background:"#E20613",padding:"16px 32px",display:"flex",alignItems:"center",
+        justifyContent:"space-between",boxShadow:"0 2px 12px rgba(226,6,19,.3)"}}>
         <div style={{display:"flex",alignItems:"center",gap:14}}>
           
           <img src={LOGO_SRC} alt="Danper" style={{width:36,height:36,borderRadius:"50%",objectFit:"cover",flexShrink:0,border:"2px solid rgba(255,255,255,.25)"}}/>
@@ -49,17 +49,25 @@ function Login({onLogin,users}){
         
         {/* Curva roja decorativa estilo portal Danper */}
         <div style={{position:"absolute",top:0,left:0,bottom:0,width:"55%",
-          background:"#C8102E",
+          background:"#E20613",
           clipPath:"ellipse(85% 100% at 0% 50%)",pointerEvents:"none"}}/>
         <div style={{position:"absolute",bottom:-100,right:-100,width:300,height:300,
-          borderRadius:"50%",background:"rgba(200,16,46,.04)",pointerEvents:"none"}}/>
+          borderRadius:"50%",background:"rgba(226,6,19,.04)",pointerEvents:"none"}}/>
         <div style={{display:"flex",gap:48,alignItems:"center",maxWidth:900,width:"100%",
           animation:"fadeUp .5s ease",position:"relative",zIndex:1}}>
           
-          {/* Panel izquierdo — texto sobre fondo rojo */}
+          {/* Panel izquierdo — logo Danper sobre fondo rojo */}
           <div style={{flex:1,color:"#fff",display:"none",paddingLeft:20}} className="desktop-info">
-            <div style={{fontFamily:"Georgia,serif",fontSize:56,fontWeight:700,
-              fontStyle:"italic",letterSpacing:1,marginBottom:8}}>Danper</div>
+            {/* Logo grande Danper — SVG inline para fidelidad al original */}
+            <svg viewBox="0 0 320 100" style={{width:320,height:100,marginBottom:18,filter:"drop-shadow(0 4px 16px rgba(0,0,0,.2))"}} xmlns="http://www.w3.org/2000/svg">
+              <text x="160" y="76"
+                fontFamily="'Lucida Handwriting','Brush Script MT','Segoe Script',cursive"
+                fontSize="92"
+                fontStyle="italic"
+                fontWeight="700"
+                fill="#fff"
+                textAnchor="middle">Danper</text>
+            </svg>
             <div style={{fontSize:24,fontWeight:600,lineHeight:1.2,marginBottom:14,opacity:.95}}>
               Bienvenido
             </div>
@@ -80,10 +88,10 @@ function Login({onLogin,users}){
           {/* Card de login — fondo blanco sólido */}
           <div style={{width:380,maxWidth:"100%",flexShrink:0,marginLeft:"auto"}}>
             <div style={{background:"#fff",border:"1px solid rgba(0,0,0,.08)",
-              borderRadius:20,padding:36,boxShadow:"0 20px 50px rgba(200,16,46,.18), 0 8px 16px rgba(0,0,0,.08)"}}>
+              borderRadius:20,padding:36,boxShadow:"0 20px 50px rgba(226,6,19,.18), 0 8px 16px rgba(0,0,0,.08)"}}>
               
               <div style={{textAlign:"center",marginBottom:28}}>
-                <img src={LOGO_SRC} alt="Danper" style={{width:52,height:52,borderRadius:"50%",objectFit:"cover",border:"3px solid #C8102E",marginBottom:14}}/>
+                <img src={LOGO_SRC} alt="Danper" style={{width:52,height:52,borderRadius:"50%",objectFit:"cover",border:"3px solid #E20613",marginBottom:14}}/>
                 <div style={{color:"#0B2748",fontSize:20,fontWeight:700}}>Iniciar Sesión</div>
                 <div style={{color:"#999",fontSize:11,marginTop:4}}>
                   Mantenimiento y Maquinaria Agrícola — 2026
@@ -96,7 +104,7 @@ function Login({onLogin,users}){
                   border:"1.5px solid rgba(0,0,0,.1)",borderRadius:10,color:"#111",fontSize:13,
                   outline:"none",fontFamily:"inherit",transition:"border .2s"}}
                   placeholder="nombre de usuario" value={u}
-                  onFocus={e=>e.target.style.borderColor="#C8102E"}
+                  onFocus={e=>e.target.style.borderColor="#E20613"}
                   onBlur={e=>e.target.style.borderColor="rgba(0,0,0,.1)"}
                   onChange={e=>setU(e.target.value)} onKeyDown={e=>e.key==="Enter"&&attempt(u,p)}/>
               </div>
@@ -107,7 +115,7 @@ function Login({onLogin,users}){
                   border:"1.5px solid rgba(0,0,0,.1)",borderRadius:10,color:"#111",fontSize:13,
                   outline:"none",fontFamily:"inherit",transition:"border .2s"}}
                   type="password" placeholder="••••••••" value={p}
-                  onFocus={e=>e.target.style.borderColor="#C8102E"}
+                  onFocus={e=>e.target.style.borderColor="#E20613"}
                   onBlur={e=>e.target.style.borderColor="rgba(0,0,0,.1)"}
                   onChange={e=>setP(e.target.value)} onKeyDown={e=>e.key==="Enter"&&attempt(u,p)}/>
               </div>
@@ -115,12 +123,12 @@ function Login({onLogin,users}){
                 margin:"12px 0",padding:"9px",background:"#FEE2E2",
                 borderRadius:8,border:"1px solid #FCA5A5"}}>{err}</div>}
               <button onClick={()=>attempt(u,p)}
-                onMouseEnter={e=>e.currentTarget.style.background="#A30D26"}
-                onMouseLeave={e=>e.currentTarget.style.background="#C8102E"}
-                style={{width:"100%",padding:"14px",background:"#C8102E",color:"#fff",
+                onMouseEnter={e=>e.currentTarget.style.background="#B30410"}
+                onMouseLeave={e=>e.currentTarget.style.background="#E20613"}
+                style={{width:"100%",padding:"14px",background:"#E20613",color:"#fff",
                   border:"none",borderRadius:30,fontSize:14,fontWeight:700,cursor:"pointer",
                   marginTop:20,fontFamily:"inherit",letterSpacing:.5,
-                  boxShadow:"0 6px 16px rgba(200,16,46,.35)",transition:"background .15s"}}>
+                  boxShadow:"0 6px 16px rgba(226,6,19,.35)",transition:"background .15s"}}>
                 Ingresar →
               </button>
             </div>
@@ -128,7 +136,7 @@ function Login({onLogin,users}){
         </div>
       </div>
       
-      <div style={{background:"#C8102E",padding:"10px 32px",display:"flex",
+      <div style={{background:"#E20613",padding:"10px 32px",display:"flex",
         alignItems:"center",justifyContent:"space-between"}}>
         <span style={{color:"rgba(255,255,255,.7)",fontSize:10}}>
           © 2026 Danper Trujillo S.A.C. · Todos los derechos reservados
@@ -2641,7 +2649,7 @@ function DashboardPlanner({user,onLogout,maestros,setMaestros,vales,users,setUse
 function AppAprobador({user,onLogout,vales,setVales,users,precioPorGalon=18.5}){
   const [tab,setTab]=useState("pendientes");
   const [toast,setToast]=useState({msg:""});
-  const RED="#C8102E";
+  const RED="#E20613";
   const misCultivos=user.cultivos||[];
   const misVales=vales.filter(v=>misCultivos.length===0||misCultivos.includes(v.cultivo))
     .sort((a,b)=>{
@@ -2818,7 +2826,7 @@ function AppAprobador({user,onLogout,vales,setVales,users,precioPorGalon=18.5}){
   return(
     <div style={{minHeight:"100vh",background:C.bg,fontFamily:"system-ui,sans-serif"}}>
       <style>{`*{box-sizing:border-box}`}</style>
-      <div style={{background:RED,padding:"0 18px",display:"flex",alignItems:"center",height:52,gap:12,position:"sticky",top:0,zIndex:10,boxShadow:"0 2px 8px rgba(200,16,46,.3)"}}>
+      <div style={{background:RED,padding:"0 18px",display:"flex",alignItems:"center",height:52,gap:12,position:"sticky",top:0,zIndex:10,boxShadow:"0 2px 8px rgba(226,6,19,.3)"}}>
         <img src={LOGO_SRC} alt="Danper" style={{width:36,height:36,borderRadius:"50%",objectFit:"cover",flexShrink:0,border:"2px solid rgba(255,255,255,.25)"}}/>
         <div>
           <div style={{color:"#fff",fontSize:13,fontWeight:700}}>Panel de Aprobaciones</div>
@@ -3023,7 +3031,7 @@ function AppGerente({user,onLogout,vales,setVales,users,setUsers,maestros:maestr
   const [newUser,setNewUser]=useState({usuario:"",pass:"",nombre:"",rol:"alm",cultivos:[]});
   const [gerFiltro,setGerFiltro]=useState({estado:"",fundo:"",cultivo:"",tipo:"",search:""});
   const [gerSort,setGerSort]=useState({col:"fecha",dir:-1});
-  const RED="#C8102E";
+  const RED="#E20613";
   // Cargar maestros propios desde Firebase (no depender del prop del padre)
   const [maestros,setMaestrosLocal]=useState(maestrosProp||{});
   useEffect(()=>{
@@ -3053,7 +3061,7 @@ function AppGerente({user,onLogout,vales,setVales,users,setUsers,maestros:maestr
   return(
     <div style={{minHeight:"100vh",background:C.bg,fontFamily:"system-ui,sans-serif"}}>
       <style>{`*{box-sizing:border-box}select{-webkit-appearance:none}`}</style>
-      <div style={{background:RED,padding:"0 18px",display:"flex",alignItems:"center",height:52,gap:12,position:"sticky",top:0,zIndex:10,boxShadow:"0 2px 8px rgba(200,16,46,.3)"}}>
+      <div style={{background:RED,padding:"0 18px",display:"flex",alignItems:"center",height:52,gap:12,position:"sticky",top:0,zIndex:10,boxShadow:"0 2px 8px rgba(226,6,19,.3)"}}>
         <img src={LOGO_SRC} alt="Danper" style={{width:36,height:36,borderRadius:"50%",objectFit:"cover",flexShrink:0,border:"2px solid rgba(255,255,255,.25)"}}/>
         <div>
           <div style={{color:"#fff",fontSize:13,fontWeight:700}}>Panel de Gerencia</div>
@@ -3581,8 +3589,8 @@ export default function App(){
   if(cargando) return(
     <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",
       background:"linear-gradient(145deg,#1a0305,#0B1628)",flexDirection:"column",gap:16}}>
-      <div className="spin-anim" style={{width:56,height:56,border:"4px solid rgba(200,16,46,.3)",
-        borderTop:"4px solid #C8102E",borderRadius:"50%"}}/>
+      <div className="spin-anim" style={{width:56,height:56,border:"4px solid rgba(226,6,19,.3)",
+        borderTop:"4px solid #E20613",borderRadius:"50%"}}/>
       <style>{".spin-anim{animation:spin 1s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}"}</style>
       <div style={{color:"rgba(255,255,255,.6)",fontSize:14}}>Conectando con Firebase...</div>
     </div>
