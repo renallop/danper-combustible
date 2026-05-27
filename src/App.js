@@ -44,76 +44,83 @@ function Login({onLogin,users}){
         </div>
       </div>
       
-      <div style={{flex:1,background:"linear-gradient(145deg,#1a0305 0%,#2D0A0F 40%,#0B1628 100%)",
+      <div style={{flex:1,background:"#fff",
         display:"flex",alignItems:"center",justifyContent:"center",padding:"40px 20px",position:"relative",overflow:"hidden"}}>
         
-        <div style={{position:"absolute",top:-60,right:-60,width:300,height:300,
-          borderRadius:"50%",background:"rgba(200,16,46,.08)",pointerEvents:"none"}}/>
-        <div style={{position:"absolute",bottom:-80,left:-40,width:220,height:220,
-          borderRadius:"50%",background:"rgba(200,16,46,.06)",pointerEvents:"none"}}/>
-        <div style={{position:"absolute",top:0,left:0,right:0,height:3,
-          background:"linear-gradient(90deg,transparent,#C8102E,transparent)",opacity:.5}}/>
+        {/* Curva roja decorativa estilo portal Danper */}
+        <div style={{position:"absolute",top:0,left:0,bottom:0,width:"55%",
+          background:"#C8102E",
+          clipPath:"ellipse(85% 100% at 0% 50%)",pointerEvents:"none"}}/>
+        <div style={{position:"absolute",bottom:-100,right:-100,width:300,height:300,
+          borderRadius:"50%",background:"rgba(200,16,46,.04)",pointerEvents:"none"}}/>
         <div style={{display:"flex",gap:48,alignItems:"center",maxWidth:900,width:"100%",
-          animation:"fadeUp .5s ease"}}>
+          animation:"fadeUp .5s ease",position:"relative",zIndex:1}}>
           
-          <div style={{flex:1,color:"#fff",display:"none"}} className="desktop-info">
-            <div style={{fontSize:11,color:"#C8102E",fontWeight:700,letterSpacing:2,
-              textTransform:"uppercase",marginBottom:12}}>Sistema de Control</div>
-            <div style={{fontSize:32,fontWeight:700,lineHeight:1.2,marginBottom:16}}>
-              Mantenimiento y<br/>
-              <span style={{color:"#C8102E"}}>Maquinaria</span><br/>
-              Agrícola
+          {/* Panel izquierdo — texto sobre fondo rojo */}
+          <div style={{flex:1,color:"#fff",display:"none",paddingLeft:20}} className="desktop-info">
+            <div style={{fontFamily:"Georgia,serif",fontSize:56,fontWeight:700,
+              fontStyle:"italic",letterSpacing:1,marginBottom:8}}>Danper</div>
+            <div style={{fontSize:24,fontWeight:600,lineHeight:1.2,marginBottom:14,opacity:.95}}>
+              Bienvenido
             </div>
-            <div style={{fontSize:13,color:"rgba(255,255,255,.5)",lineHeight:1.7,maxWidth:320}}>
-              Gestión integral de consumo de combustible,<br/>
-              control de anomalías y aprobaciones por cultivo.
+            <div style={{fontSize:11,letterSpacing:2.5,
+              textTransform:"uppercase",opacity:.85,marginBottom:32}}>
+              Portal de Mantenimiento y Maquinaria
             </div>
-            <div style={{marginTop:24,display:"flex",gap:16,flexWrap:"wrap"}}>
+            <div style={{height:1,width:60,background:"rgba(255,255,255,.5)",marginBottom:24}}/>
+            <div style={{display:"flex",gap:18,flexWrap:"wrap"}}>
               {[["⛽","Control de vales"],["📊","Dashboard en tiempo real"],["✅","Aprobaciones por cultivo"]].map(([ico,txt])=>(
-                <div key={txt} style={{display:"flex",alignItems:"center",gap:7,fontSize:12,color:"rgba(255,255,255,.6)"}}>
+                <div key={txt} style={{display:"flex",alignItems:"center",gap:7,fontSize:12,color:"rgba(255,255,255,.85)"}}>
                   <span>{ico}</span>{txt}
                 </div>
               ))}
             </div>
           </div>
           
-          <div style={{width:340,maxWidth:"100%",flexShrink:0}}>
-            <div style={{background:"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.1)",
-              borderRadius:20,padding:32,backdropFilter:"blur(12px)"}}>
+          {/* Card de login — fondo blanco sólido */}
+          <div style={{width:380,maxWidth:"100%",flexShrink:0,marginLeft:"auto"}}>
+            <div style={{background:"#fff",border:"1px solid rgba(0,0,0,.08)",
+              borderRadius:20,padding:36,boxShadow:"0 20px 50px rgba(200,16,46,.18), 0 8px 16px rgba(0,0,0,.08)"}}>
               
-              <div style={{textAlign:"center",marginBottom:24}}>
-                <img src={LOGO_SRC} alt="Danper" style={{width:36,height:36,borderRadius:"50%",objectFit:"cover",flexShrink:0,border:"2px solid rgba(255,255,255,.25)"}}/>
-                <div style={{color:"#fff",fontSize:16,fontWeight:700}}>Iniciar Sesión</div>
-                <div style={{color:"rgba(255,255,255,.4)",fontSize:11,marginTop:3}}>
+              <div style={{textAlign:"center",marginBottom:28}}>
+                <img src={LOGO_SRC} alt="Danper" style={{width:52,height:52,borderRadius:"50%",objectFit:"cover",border:"3px solid #C8102E",marginBottom:14}}/>
+                <div style={{color:"#0B2748",fontSize:20,fontWeight:700}}>Iniciar Sesión</div>
+                <div style={{color:"#999",fontSize:11,marginTop:4}}>
                   Mantenimiento y Maquinaria Agrícola — 2026
                 </div>
               </div>
-              <div style={{marginBottom:14}}>
-                <div style={{color:"rgba(255,255,255,.6)",fontSize:10,fontWeight:700,
+              <div style={{marginBottom:16}}>
+                <div style={{color:"#555",fontSize:10,fontWeight:700,
                   textTransform:"uppercase",letterSpacing:.8,marginBottom:6}}>Usuario</div>
-                <input style={{width:"100%",padding:"11px 14px",background:"rgba(255,255,255,.08)",
-                  border:"1px solid rgba(255,255,255,.15)",borderRadius:9,color:"#fff",fontSize:13,
+                <input style={{width:"100%",padding:"12px 14px",background:"#FAFAF8",
+                  border:"1.5px solid rgba(0,0,0,.1)",borderRadius:10,color:"#111",fontSize:13,
                   outline:"none",fontFamily:"inherit",transition:"border .2s"}}
                   placeholder="nombre de usuario" value={u}
+                  onFocus={e=>e.target.style.borderColor="#C8102E"}
+                  onBlur={e=>e.target.style.borderColor="rgba(0,0,0,.1)"}
                   onChange={e=>setU(e.target.value)} onKeyDown={e=>e.key==="Enter"&&attempt(u,p)}/>
               </div>
               <div style={{marginBottom:4}}>
-                <div style={{color:"rgba(255,255,255,.6)",fontSize:10,fontWeight:700,
+                <div style={{color:"#555",fontSize:10,fontWeight:700,
                   textTransform:"uppercase",letterSpacing:.8,marginBottom:6}}>Contraseña</div>
-                <input style={{width:"100%",padding:"11px 14px",background:"rgba(255,255,255,.08)",
-                  border:"1px solid rgba(255,255,255,.15)",borderRadius:9,color:"#fff",fontSize:13,
+                <input style={{width:"100%",padding:"12px 14px",background:"#FAFAF8",
+                  border:"1.5px solid rgba(0,0,0,.1)",borderRadius:10,color:"#111",fontSize:13,
                   outline:"none",fontFamily:"inherit",transition:"border .2s"}}
                   type="password" placeholder="••••••••" value={p}
+                  onFocus={e=>e.target.style.borderColor="#C8102E"}
+                  onBlur={e=>e.target.style.borderColor="rgba(0,0,0,.1)"}
                   onChange={e=>setP(e.target.value)} onKeyDown={e=>e.key==="Enter"&&attempt(u,p)}/>
               </div>
-              {err&&<div style={{color:"#FCA5A5",fontSize:12,textAlign:"center",
-                margin:"10px 0",padding:"8px",background:"rgba(200,16,46,.15)",
-                borderRadius:7}}>{err}</div>}
+              {err&&<div style={{color:"#B91C1C",fontSize:12,textAlign:"center",
+                margin:"12px 0",padding:"9px",background:"#FEE2E2",
+                borderRadius:8,border:"1px solid #FCA5A5"}}>{err}</div>}
               <button onClick={()=>attempt(u,p)}
-                style={{width:"100%",padding:"13px",background:"#C8102E",color:"#fff",
-                  border:"none",borderRadius:9,fontSize:14,fontWeight:700,cursor:"pointer",
-                  marginTop:16,fontFamily:"inherit",letterSpacing:.5,
-                  boxShadow:"0 4px 16px rgba(200,16,46,.4)",transition:"all .15s"}}>
+                onMouseEnter={e=>e.currentTarget.style.background="#A30D26"}
+                onMouseLeave={e=>e.currentTarget.style.background="#C8102E"}
+                style={{width:"100%",padding:"14px",background:"#C8102E",color:"#fff",
+                  border:"none",borderRadius:30,fontSize:14,fontWeight:700,cursor:"pointer",
+                  marginTop:20,fontFamily:"inherit",letterSpacing:.5,
+                  boxShadow:"0 6px 16px rgba(200,16,46,.35)",transition:"background .15s"}}>
                 Ingresar →
               </button>
             </div>

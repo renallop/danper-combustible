@@ -7,7 +7,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import { useEffect, useState } from "react";
 
-const CSS_GLOBAL = `*{box-sizing:border-box}input::placeholder{color:rgba(255,255,255,.4)}@keyframes fadeUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}`;
+const CSS_GLOBAL = `*{box-sizing:border-box}input::placeholder{color:rgba(0,0,0,.35)}@keyframes fadeUp{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}@media(min-width:820px){.desktop-info{display:block !important}}`;
 const CSS_DRAWER = `@keyframes fadeIn{from{opacity:0}to{opacity:1}}@keyframes slideIn{from{transform:translateX(60px);opacity:0}to{transform:none;opacity:1}}`;
 const CSS_DASH = `*{box-sizing:border-box}::-webkit-scrollbar{width:4px;height:4px}::-webkit-scrollbar-thumb{background:#ccc;border-radius:2px}select{-webkit-appearance:none}`;
 // Estilos base reutilizables
