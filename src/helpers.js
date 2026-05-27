@@ -179,10 +179,10 @@ function KCard({label,value,sub,color,accent}){
 function Toast({msg,type,onClose}){
   // Errores requieren más tiempo (8s vs 3.2s) para que el usuario los lea
   useEffect(()=>{
-    if(!msg) return;
+    if(!msg)return;
     const ms = type==="err" ? 8000 : 3200;
-    const t = setTimeout(onClose, ms);
-    return ()=>clearTimeout(t);
+    const t=setTimeout(onClose,ms);
+    return()=>clearTimeout(t);
   },[msg,type]);
   if(!msg)return null;
   const bg=type==="ok"?C.ok:type==="err"?C.crit:type==="warn"?C.warn:C.navy;
@@ -198,8 +198,8 @@ function Toast({msg,type,onClose}){
 }
 
 // Abre una imagen (incluso data URLs) en un lightbox modal a pantalla completa.
-// Usamos esto porque los navegadores modernos bloquean window.open con data URLs
-// (medida anti-phishing). Usa DOM puro para invocarse desde cualquier onClick.
+// Reemplaza window.open() que está bloqueado por seguridad anti-phishing
+// en navegadores modernos cuando la URL es data:image.
 function verImagenAmpliada(src){
   if(!src) return;
   const existente = document.getElementById("__lightbox_foto__");
@@ -270,6 +270,43 @@ function BotonRefrescar({onRecargar, onToast, dark=false}){
   );
 }
 
+// Comprime una imagen data URL para no superar el límite de 1MB de Firestore
+function comprimirImagen(dataUrl, maxLado=900, calidad=0.7){
+  return new Promise((resolve,reject)=>{
+    if(!dataUrl){ resolve(null); return; }
+    const img = new Image();
+    img.onload = () => {
+      try{
+        let w = img.width, h = img.height;
+        if(w > maxLado || h > maxLado){
+          const r = w > h ? maxLado/w : maxLado/h;
+          w = Math.round(w*r); h = Math.round(h*r);
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = w; canvas.height = h;
+        canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL("image/jpeg", calidad));
+      }catch(e){ reject(e); }
+    };
+    img.onerror = reject;
+    img.src = dataUrl;
+  });
+}
+
+// Elimina recursivamente claves con valor undefined (Firestore las rechaza)
+function limpiarUndefined(v){
+  if(Array.isArray(v)) return v.map(limpiarUndefined);
+  if(v && typeof v==="object"){
+    const o={};
+    for(const [k,val] of Object.entries(v)){
+      if(val===undefined) continue;
+      o[k] = limpiarUndefined(val);
+    }
+    return o;
+  }
+  return v;
+}
+
 // ─── buildUnified — combina histórico + vales app en una sola lista ─────────
 const buildUnified=(vales)=>{
   const hist=[
@@ -306,5 +343,5 @@ export {
   C, S,
   actividadesPorTipo, getRatio, buildUnified,
   Badge, KCard, Toast,
-  verImagenAmpliada, BotonRefrescar,
+  verImagenAmpliada, BotonRefrescar, comprimirImagen, limpiarUndefined,
 };

@@ -108,8 +108,8 @@ export async function reservarSiguienteVale() {
   });
 }
 
-// Libera un número de vale previamente reservado, cuando el guardado falló.
-// Solo libera si nadie más reservó después (evita pisar reservas concurrentes).
+// Libera un número de vale previamente reservado cuando el guardado falló.
+// Solo libera si nadie reservó después (evita pisar reservas concurrentes).
 export async function liberarVale(numero) {
   if (numero == null || numero < 1) return false;
   const ref = doc(db, "config", "counter");
